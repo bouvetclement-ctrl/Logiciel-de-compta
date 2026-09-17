@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comptes de la famille</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{
+    --bg:#F6F3EA; --surface:#FFFFFF; --surface-2:#EFEADB; --border:#DAD3BE;
+    --ink:#232720; --muted:#6E6A5C;
+    --green:#2F5D50;
+    --terracotta:#B5533C; --gold:#B4881E; --blue:#3A6EA5;
+    --font-display:"Lora", Georgia, serif;
+    --font-body:"Inter", -apple-system, "Segoe UI", sans-serif;
+    --font-mono:"IBM Plex Mono", "Courier New", monospace;
+  }
+  :root:not([data-theme="light"]){ color-scheme: light dark; }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#181A17; --surface:#212420; --surface-2:#2A2D27; --border:#3B3E36;
+      --ink:#EDEAE0; --muted:#9B968A; --green:#6FA893; --terracotta:#E08268; --gold:#E4B23C; --blue:#7AA9D6;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#181A17; --surface:#212420; --surface-2:#2A2D27; --border:#3B3E36;
+    --ink:#EDEAE0; --muted:#9B968A; --green:#6FA893; --terracotta:#E08268; --gold:#E4B23C; --blue:#7AA9D6;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--ink); font-family:var(--font-body); min-height:100vh; line-height:1.5; }
+  .wrap{ max-width:1080px; margin:0 auto; padding:26px 20px 80px; }
+
+  header.led{
+    background:var(--surface); border:1px solid var(--border); border-radius:6px;
+    padding:22px 26px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px;
+  }
+  header.led h1{ font-family:var(--font-display); font-weight:700; font-size:clamp(24px,4vw,32px); margin:0 0 6px; }
+  header.led input#famTitle{
+    font-family:var(--font-display); font-weight:700; font-size:clamp(22px,4vw,30px);
+    background:transparent; border:none; border-bottom:1px dashed var(--border); color:var(--ink);
+    padding:2px 0; width:280px; max-width:60vw;
+  }
+  header.led input#famTitle:focus{ outline:none; border-bottom-color:var(--green); }
+  header.led .sub{ color:var(--muted); font-size:13px; }
+  .kpis{ display:flex; gap:22px; flex-wrap:wrap; }
+  .kpi{ text-align:right; }
+  .kpi .l{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .kpi .v{ font-family:var(--font-mono); font-size:19px; font-weight:600; }
+  .kpi .v.pos{ color:var(--green); }
+  .kpi .v.neg{ color:var(--terracotta); }
+
+  nav.tabs{ display:flex; gap:4px; margin-bottom:18px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  nav.tabs button{
+    font-family:var(--font-display); font-size:15px; background:none; border:none; color:var(--muted);
+    padding:10px 4px; margin-right:24px; cursor:pointer; border-bottom:3px solid transparent;
+  }
+  nav.tabs button:hover{ color:var(--ink); }
+  nav.tabs button.active{ color:var(--green); border-bottom-color:var(--green); }
+
+  .toolbar{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+
+  section.view{ display:none; }
+  section.view.active{ display:block; }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; margin-bottom:18px; }
+  .card h2{ font-family:var(--font-display); font-size:19px; font-weight:600; margin:0 0 4px; }
+  .card .sub{ color:var(--muted); font-size:13px; margin:0 0 16px; }
+
+  label{ font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  input[type=text], input[type=number], input[type=date], input[type=file], select{
+    width:100%; background:var(--surface-2); border:1px solid var(--border); color:var(--ink);
+    font:inherit; font-size:14px; padding:9px 10px; border-radius:4px;
+  }
+  input:focus, select:focus{ outline:none; border-color:var(--green); }
+  .field{ margin-bottom:12px; }
+  .grid-form{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:12px; }
+
+  button.btn{ font-family:var(--font-body); font-weight:600; font-size:14px; background:var(--green); color:#fff;
+    border:none; border-radius:4px; padding:10px 18px; cursor:pointer; }
+  button.btn:hover{ filter:brightness(1.08); }
+  button.btn.secondary{ background:transparent; color:var(--ink); border:1px solid var(--border); }
+  button.btn.small{ padding:6px 12px; font-size:12.5px; }
+  button.btn:disabled{ opacity:.5; cursor:not-allowed; }
+  button.icon-btn{ background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; padding:2px 6px; }
+  button.icon-btn:hover{ color:var(--terracotta); }
+
+  table{ width:100%; border-collapse:collapse; font-size:13.5px; }
+  th{ text-align:left; font-family:var(--font-display); font-weight:600; font-size:12.5px; color:var(--muted);
+    padding:8px 9px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td{ padding:8px 9px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr:last-child td{ border-bottom:none; }
+  td.num, th.num{ text-align:right; font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+  td.amt.pos{ color:var(--green); } td.amt.neg{ color:var(--terracotta); }
+  .empty{ color:var(--muted); font-size:13px; padding:18px 4px; text-align:center; }
+  .table-scroll{ overflow-x:auto; }
+
+  .tag{ display:inline-block; font-size:10.5px; font-weight:600; padding:2px 7px; border-radius:9px; white-space:nowrap; }
+  .tag.rule{ background:rgba(47,93,80,.14); color:var(--green); }
+  .tag.ai{ background:rgba(180,136,30,.16); color:var(--gold); }
+  .tag.manual{ background:var(--surface-2); color:var(--muted); }
+  .tag.import{ background:rgba(58,110,165,.14); color:var(--blue); }
+  .tag.none{ background:rgba(181,83,60,.14); color:var(--terracotta); }
+
+  .catsel{ font-size:12.5px; padding:5px 6px; }
+
+  .drop{ border:2px dashed var(--border); border-radius:6px; padding:26px; text-align:center; color:var(--muted); }
+  .drop.drag{ border-color:var(--green); color:var(--green); }
+
+  .hint{ font-size:12px; color:var(--muted); margin-top:8px; }
+
+  .bar-track{ height:9px; background:var(--surface-2); border-radius:5px; overflow:hidden; border:1px solid var(--border); }
+  .bar-fill{ height:100%; background:var(--green); }
+  .bar-fill.exp{ background:var(--terracotta); }
+  .cat-row{ margin-bottom:13px; }
+  .cat-row .top{ display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+  .cat-row .name{ font-weight:600; }
+  .cat-row .amt{ font-family:var(--font-mono); color:var(--muted); }
+
+  select.mapsel{ max-width:220px; }
+  .mapping-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:16px; }
+
+  .sync-banner{ font-size:12.5px; padding:8px 14px; border-radius:5px; margin-bottom:16px; border:1px solid var(--border); }
+  .sync-banner.cloud{ background:rgba(47,93,80,.10); color:var(--green); border-color:rgba(47,93,80,.3); }
+  .sync-banner.local{ background:var(--surface-2); color:var(--muted); }
+  .sync-banner.error{ background:rgba(181,83,60,.10); color:var(--terracotta); border-color:rgba(181,83,60,.3); }
+
+  footer{ text-align:center; color:var(--muted); font-size:12px; margin-top:30px; }
+  @media (max-width:560px){ .wrap{ padding:16px 12px 60px; } header.led{ padding:18px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="led">
+    <div>
+      <input id="famTitle" type="text" value="Comptes de la famille">
+      <div class="sub">Import bancaire, tri automatique, suivi mensuel — synchronisé sur votre Google Drive.</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Revenus</div><div class="v pos" id="kpiIn">0,00 €</div></div>
+      <div class="kpi"><div class="l">Dépenses</div><div class="v neg" id="kpiOut">0,00 €</div></div>
+      <div class="kpi"><div class="l">Solde</div><div class="v" id="kpiNet">0,00 €</div></div>
+    </div>
+  </header>
+
+  <div id="syncBanner" class="sync-banner local">Vérification du stockage…</div>
+
+  <div class="card" style="padding:16px 18px; margin-bottom:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <h2 style="font-size:15px; margin:0;">🔗 Google Drive</h2>
+      <div style="display:flex; gap:8px;">
+        <button class="btn small" id="gConnectBtn" onclick="connectGoogle()">Se connecter à Google</button>
+        <button class="btn secondary small" onclick="manualRefresh()">🔄 Actualiser</button>
+        <button class="btn secondary small" onclick="disconnectGoogle()">Se déconnecter</button>
+      </div>
+    </div>
+    <div class="grid-form" style="margin-top:12px; margin-bottom:6px;">
+      <div class="field" style="grid-column: span 2;">
+        <label>Identifiant Google (OAuth Client ID) — propre à votre hébergement</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="gClientId" placeholder="xxxxxxxx.apps.googleusercontent.com">
+          <button class="btn secondary small" onclick="saveGClientId()">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint" id="gStatus" style="margin-top:2px;"></p>
+  </div>
+
+  <nav class="tabs">
+    <button class="active" data-view="import">Import</button>
+    <button data-view="transactions">Transactions</button>
+    <button data-view="regles">Règles &amp; catégories</button>
+    <button data-view="dashboard">Tableau de bord</button>
+  </nav>
+
+  <div class="toolbar">
+    <span class="hint" style="margin:0;">Sauvegardez régulièrement vos données (fichier JSON) pour les transporter ou les partager.</span>
+    <div style="display:flex; gap:8px;">
+      <button class="btn secondary small" onclick="exportBackup()">⭳ Exporter la sauvegarde</button>
+      <button class="btn secondary small" onclick="document.getElementById('importBackupFile').click()">⭱ Importer une sauvegarde</button>
+      <input type="file" id="importBackupFile" accept="application/json" style="display:none" onchange="importBackup(this.files[0])">
+    </div>
+  </div>
+
+  <!-- ============ IMPORT ============ -->
+  <section class="view active" id="view-import">
+    <div class="card">
+      <h2>Importer un relevé bancaire (CSV)</h2>
+      <p class="sub">Exportez vos opérations depuis votre banque au format CSV, puis déposez le fichier ici. Seules les colonnes que vous choisissez (date, libellé, montant) sont importées — le reste n'est jamais lu.</p>
+      <div class="drop" id="dropZone">
+        📄 Glissez un fichier CSV ici, ou
+        <label for="csvFile" style="color:var(--green); cursor:pointer; text-decoration:underline;">choisissez-le</label>
+        <input type="file" id="csvFile" accept=".csv,text/csv" style="display:none" onchange="handleFile(this.files[0])">
+      </div>
+      <div id="mappingBox" style="display:none; margin-top:18px;">
+        <h2 style="font-size:16px;">Correspondance des colonnes</h2>
+        <div class="mapping-grid">
+          <div class="field"><label>Colonne Date</label><select id="mapDate" class="mapsel"></select></div>
+          <div class="field"><label>Colonne Libellé</label><select id="mapLabel" class="mapsel"></select></div>
+          <div class="field">
+            <label>Montant</label>
+            <select id="mapAmountMode" onchange="toggleAmountMode()">
+              <option value="single">Une seule colonne (+/-)</option>
+              <option value="split">Débit / Crédit séparés</option>
+            </select>
+          </div>
+          <div class="field" id="mapAmountSingleBox"><label>Colonne Montant</label><select id="mapAmount" class="mapsel"></select></div>
+          <div class="field" id="mapDebitBox" style="display:none;"><label>Colonne Débit</label><select id="mapDebit" class="mapsel"></select></div>
+          <div class="field" id="mapCreditBox" style="display:none;"><label>Colonne Crédit</label><select id="mapCredit" class="mapsel"></select></div>
+          <div class="field"><label>Colonne Catégorie (si déjà présente)</label><select id="mapCategory" class="mapsel"></select></div>
+        </div>
+        <p class="hint" id="importPreambleHint" style="display:none;"></p>
+        <div class="table-scroll">
+          <table id="previewTable"></table>
+        </div>
+        <p class="hint" id="importSummary"></p>
+        <button class="btn" onclick="confirmImport()" style="margin-top:12px;">Importer ces opérations</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TRANSACTIONS ============ -->
+  <section class="view" id="view-transactions">
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Journal des opérations</h2>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn small" id="aiSortBtn" onclick="runAiSort()">✨ Trier avec l'IA les non catégorisées</button>
+          <button class="btn secondary small" onclick="exportCsv()">⭳ Export CSV</button>
+        </div>
+      </div>
+      <p class="sub">Le tri par règles (mots-clés) fonctionne sans IA et sans abonnement, y compris hors ligne. Le bouton IA est un coup de pouce optionnel pour les cas ambigus : il utilise simplement votre usage Claude habituel.</p>
+      <div class="grid-form" style="margin-bottom:6px;">
+        <div class="field"><label>Recherche</label><input type="text" id="filterSearch" placeholder="Libellé..." oninput="renderTransactions()"></div>
+        <div class="field"><label>Catégorie</label><select id="filterCategory" onchange="renderTransactions()"></select></div>
+        <div class="field"><label>Mois</label><select id="filterMonth" onchange="renderTransactions()"></select></div>
+      </div>
+      <p class="hint" id="aiHint" style="display:none;"></p>
+      <div id="aiRulesReview" class="card" style="display:none; margin:0 0 16px; padding:14px 16px; background:var(--surface-2);">
+        <h2 style="font-size:15px; margin-bottom:8px;">Règles proposées par l'IA</h2>
+        <p class="sub" style="margin-bottom:10px;">Ces règles s'appliqueront automatiquement aux futurs imports. Décochez celles que vous ne voulez pas garder.</p>
+        <div id="aiRulesList"></div>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <button class="btn small" onclick="confirmAiRules()">Ajouter les règles cochées</button>
+          <button class="btn secondary small" onclick="dismissAiRules()">Ignorer</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Catégorie</th><th>Origine</th><th></th></tr></thead>
+          <tbody id="txTable"></tbody>
+        </table>
+      </div>
+      <div id="txEmpty" class="empty">Aucune opération. Importez un relevé pour commencer.</div>
+    </div>
+  </section>
+
+  <!-- ============ REGLES & CATEGORIES ============ -->
+  <section class="view" id="view-regles">
+    <div class="card">
+      <h2>Catégories</h2>
+      <p class="sub">La liste des postes utilisés pour classer les opérations.</p>
+      <div class="grid-form">
+        <div class="field"><label>Nom</label><input type="text" id="newCatName" placeholder="Ex : Alimentation"></div>
+        <div class="field"><label>Type</label><select id="newCatType"><option value="depense">Dépense</option><option value="revenu">Revenu</option></select></div>
+        <div class="field" style="align-self:end;"><button class="btn" onclick="addCategory()">Ajouter</button></div>
+      </div>
+      <table>
+        <thead><tr><th>Catégorie</th><th>Type</th><th></th></tr></thead>
+        <tbody id="catTable"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Règles de tri automatique</h2>
+      <p class="sub">Si le libellé d'une opération contient ce mot-clé (insensible à la casse), elle est classée automatiquement dans la catégorie associée, dès l'import.</p>
+      <div class="grid-form">
+        <div class="field"><label>Mot-clé dans le libellé</label><input type="text" id="newRuleKeyword" placeholder="Ex : CARREFOUR"></div>
+        <div class="field"><label>Catégorie</label><select id="newRuleCategory"></select></div>
+        <div class="field" style="align-self:end;"><button class="btn" onclick="addRule()">Ajouter</button></div>
+      </div>
+      <table>
+        <thead><tr><th>Mot-clé</th><th>Catégorie</th><th></th></tr></thead>
+        <tbody id="ruleTable"></tbody>
+      </table>
+      <button class="btn secondary small" style="margin-top:14px;" onclick="reapplyRules()">Réappliquer les règles aux opérations non catégorisées</button>
+    </div>
+  </section>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section class="view" id="view-dashboard">
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Répartition par catégorie</h2>
+        <select id="dashMonth" onchange="renderDashboard()" style="max-width:180px;"></select>
+      </div>
+      <p class="sub">Dépenses par poste sur la période sélectionnée.</p>
+      <div id="dashCats"></div>
+      <div id="dashCatsEmpty" class="empty">Aucune dépense catégorisée sur cette période.</div>
+    </div>
+    <div class="card">
+      <h2>Évolution mensuelle</h2>
+      <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Mois</th><th class="num">Revenus</th><th class="num">Dépenses</th><th class="num">Solde</th></tr></thead>
+          <tbody id="monthTable"></tbody>
+        </table>
+      </div>
+      <div id="monthEmpty" class="empty">Pas encore de données.</div>
+    </div>
+  </section>
+
+  <footer>Vos données sont stockées dans votre propre Google Drive (fichier « comptes-famille-data.json », accès limité aux fichiers créés par cet outil), ou localement si vous n'êtes pas connecté. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
+</div>
+
+<script>
+const STORAGE_KEY = "familyBudget_v1";       // cache local (secours uniquement)
+const GDRIVE_CFG_KEY = "familyBudget_gdrive"; // client id + fileId (non sensibles)
+const DRIVE_FILE_NAME = "comptes-famille-data.json";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function euro(n){ if(!isFinite(n)) n=0; return n.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €"; }
+
+function defaultCategories(){
+  return [
+    { id: uid(), name: "Alimentation", type: "depense" },
+    { id: uid(), name: "Logement", type: "depense" },
+    { id: uid(), name: "Transport", type: "depense" },
+    { id: uid(), name: "Santé", type: "depense" },
+    { id: uid(), name: "Abonnements", type: "depense" },
+    { id: uid(), name: "Loisirs", type: "depense" },
+    { id: uid(), name: "Salaire", type: "revenu" },
+    { id: uid(), name: "Autres revenus", type: "revenu" },
+    { id: uid(), name: "Divers", type: "depense" },
+  ];
+}
+function defaultState(){
+  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [] };
+}
+
+function loadLocalCache(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return defaultState();
+    const parsed = JSON.parse(raw);
+    if(!parsed || typeof parsed !== "object") return defaultState();
+    return Object.assign(defaultState(), parsed);
+  }catch(e){ return defaultState(); }
+}
+function saveLocalCache(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+  })); }catch(e){}
+}
+
+let state = { famTitle: "Comptes de la famille", categories: [], rules: [], transactions: [] };
+
+/* ---------------- Stockage : Google Drive, avec cache local de secours ---------------- */
+let storageMode = "checking"; // "google" | "local"
+let gTokenClient = null, gAccessToken = null, gTokenExpiry = 0;
+let driveFileId = null, driveClientId = null;
+let persistTimer = null;
+
+function loadDriveConfig(){
+  try{ return JSON.parse(localStorage.getItem(GDRIVE_CFG_KEY) || "{}"); }catch(e){ return {}; }
+}
+function saveDriveConfig(cfg){
+  try{ localStorage.setItem(GDRIVE_CFG_KEY, JSON.stringify(cfg)); }catch(e){}
+}
+
+function googleLibReady(){
+  return typeof google !== "undefined" && google.accounts && google.accounts.oauth2;
+}
+
+async function initStorage(){
+  state = loadLocalCache(); // affichage immédiat pendant qu'on tente Google
+  famTitleInput.value = state.famTitle;
+  renderAll();
+
+  const cfg = loadDriveConfig();
+  driveClientId = cfg.clientId || "";
+  driveFileId = cfg.fileId || null;
+  document.getElementById("gClientId").value = driveClientId;
+
+  storageMode = "local";
+  showSyncBanner("local");
+
+  if(driveClientId && googleLibReady()){
+    // on a déjà un client id : on tente une reconnexion silencieuse au clic habituel,
+    // mais on ne force pas de popup au chargement (Google l'exigerait de toute façon).
+    document.getElementById("gConnectBtn").textContent = "Se reconnecter à Google";
+  }
+  updateGoogleUi();
+  setTimeout(updateGoogleUi, 1500); // laisse le temps au script Google de charger
+}
+
+function updateGoogleUi(){
+  const box = document.getElementById("gStatus");
+  if(!googleLibReady()){
+    box.textContent = "La connexion Google n'est pas disponible dans ce contexte (ouvrez le fichier hébergé en http/https, pas via ce lien Claude).";
+  }else if(storageMode === "google"){
+    box.textContent = "Connecté à Google Drive.";
+  }else if(driveClientId){
+    box.textContent = "Identifiant Google enregistré. Cliquez sur « Se connecter » pour synchroniser.";
+  }else{
+    box.textContent = "Renseignez votre identifiant Google (Client ID) puis connectez-vous.";
+  }
+}
+
+function saveGClientId(){
+  const input = document.getElementById("gClientId");
+  driveClientId = input.value.trim();
+  saveDriveConfig({ clientId: driveClientId, fileId: driveFileId });
+  updateGoogleUi();
+}
+
+function connectGoogle(){
+  if(!googleLibReady()){
+    alert("La connexion Google n'est disponible que si vous ouvrez ce fichier hébergé en http/https (pas via ce lien Claude publié).");
+    return;
+  }
+  if(!driveClientId){
+    alert("Renseignez d'abord votre identifiant Google (Client ID) ci-dessus.");
+    return;
+  }
+  saveDriveConfig({ clientId: driveClientId, fileId: driveFileId });
+
+  gTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: driveClientId,
+    scope: DRIVE_SCOPE,
+    callback: async (resp)=>{
+      if(resp.error){ alert("Connexion Google refusée ou annulée."); return; }
+      gAccessToken = resp.access_token;
+      gTokenExpiry = Date.now() + (resp.expires_in||3500)*1000;
+      try{
+        await driveSyncOnConnect();
+        storageMode = "google";
+        showSyncBanner("google");
+        updateGoogleUi();
+        document.getElementById("gConnectBtn").textContent = "Se reconnecter à Google";
+        startAutoRefresh();
+      }catch(e){
+        console.error(e);
+        alert("Connexion réussie mais échec de l'accès à Drive : " + (e.message||e));
+      }
+    }
+  });
+  gTokenClient.requestAccessToken({ prompt: gAccessToken ? "" : "consent" });
+}
+
+function disconnectGoogle(){
+  if(gAccessToken && google.accounts && google.accounts.oauth2){
+    try{ google.accounts.oauth2.revoke(gAccessToken, ()=>{}); }catch(e){}
+  }
+  gAccessToken = null;
+  storageMode = "local";
+  showSyncBanner("local");
+  updateGoogleUi();
+  document.getElementById("gConnectBtn").textContent = "Se connecter à Google";
+  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+}
+
+async function driveApiFetch(url, options={}){
+  if(!gAccessToken || Date.now() > gTokenExpiry - 5000){
+    throw new Error("Session Google expirée — reconnectez-vous.");
+  }
+  const res = await fetch(url, {
+    ...options,
+    headers: { ...(options.headers||{}), Authorization: "Bearer " + gAccessToken }
+  });
+  if(!res.ok){
+    const text = await res.text().catch(()=> "");
+    throw new Error("Erreur Drive (" + res.status + ") " + text.slice(0,200));
+  }
+  return res;
+}
+
+async function driveFindFile(){
+  const q = encodeURIComponent(`name='${DRIVE_FILE_NAME}' and trashed=false`);
+  const res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&spaces=drive`);
+  const data = await res.json();
+  return (data.files && data.files[0]) || null;
+}
+
+async function driveCreateFile(dataObj){
+  const boundary = "-------fambudget" + uid();
+  const metadata = { name: DRIVE_FILE_NAME, mimeType: "application/json" };
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(dataObj)}\r\n` +
+    `--${boundary}--`;
+  const res = await driveApiFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+    method: "POST",
+    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    body
+  });
+  const data = await res.json();
+  return data.id;
+}
+
+async function driveReadFile(fileId){
+  const res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  return await res.json();
+}
+
+async function driveWriteFile(fileId, dataObj){
+  await driveApiFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dataObj)
+  });
+}
+
+async function driveSyncOnConnect(){
+  if(!driveFileId){
+    const existing = await driveFindFile();
+    driveFileId = existing ? existing.id : null;
+  }
+  if(driveFileId){
+    try{
+      const remote = await driveReadFile(driveFileId);
+      state.famTitle = remote.famTitle || state.famTitle;
+      state.categories = remote.categories || state.categories;
+      state.rules = remote.rules || state.rules;
+      state.transactions = remote.transactions || state.transactions;
+    }catch(e){
+      // fichier introuvable/corrompu : on repart d'une création propre
+      driveFileId = null;
+    }
+  }
+  if(!driveFileId){
+    driveFileId = await driveCreateFile({
+      famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+    });
+  }
+  saveDriveConfig({ clientId: driveClientId, fileId: driveFileId });
+  famTitleInput.value = state.famTitle;
+  renderAll();
+}
+
+let autoRefreshTimer = null;
+function startAutoRefresh(){
+  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(refreshFromDrive, 60000);
+}
+async function refreshFromDrive(){
+  if(storageMode !== "google" || !driveFileId) return;
+  try{
+    const remote = await driveReadFile(driveFileId);
+    state.famTitle = remote.famTitle || state.famTitle;
+    state.categories = remote.categories || state.categories;
+    state.rules = remote.rules || state.rules;
+    state.transactions = remote.transactions || state.transactions;
+    famTitleInput.value = state.famTitle;
+    renderAll();
+    showSyncBanner("google");
+  }catch(e){ console.error(e); showSyncBanner("error"); }
+}
+function manualRefresh(){
+  if(storageMode !== "google"){ alert("Connectez-vous d'abord à Google."); return; }
+  refreshFromDrive();
+}
+
+function showSyncBanner(mode){
+  const el = document.getElementById("syncBanner");
+  if(!el) return;
+  if(mode === "google"){
+    el.className = "sync-banner cloud";
+    el.textContent = "☁️ Synchronisé sur Google Drive — accessible depuis tous vos appareils connectés à ce même compte Google.";
+  }else if(mode === "error"){
+    el.className = "sync-banner error";
+    el.textContent = "⚠️ Problème de connexion à Google Drive — vos modifications récentes peuvent ne pas être enregistrées. Reconnectez-vous si besoin.";
+  }else{
+    el.className = "sync-banner local";
+    el.textContent = "💻 Non connecté — stockage local à cet appareil/navigateur uniquement. Connectez-vous à Google ci-dessus pour synchroniser.";
+  }
+}
+
+/* Écritures : mettent à jour le cache local `state`, puis programment
+   une synchronisation Google Drive (regroupée, avec un léger délai). */
+function schedulePersist(){
+  saveLocalCache();
+  if(storageMode !== "google" || !driveFileId) return;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(async ()=>{
+    try{
+      await driveWriteFile(driveFileId, {
+        famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+      });
+      showSyncBanner("google");
+    }catch(e){ console.error(e); showSyncBanner("error"); }
+  }, 800);
+}
+function persistConfig(){ schedulePersist(); }
+function persistTxUpsert(){ schedulePersist(); }
+function persistTxBulk(){ schedulePersist(); }
+function persistTxDelete(){ schedulePersist(); }
+
+/* ---------------- Navigation ---------------- */
+document.querySelectorAll("nav.tabs button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll("section.view").forEach(v=>v.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("view-"+btn.dataset.view).classList.add("active");
+    if(btn.dataset.view === "dashboard") renderDashboard();
+    if(btn.dataset.view === "transactions") renderTransactions();
+  });
+});
+
+const famTitleInput = document.getElementById("famTitle");
+famTitleInput.addEventListener("change", ()=>{ state.famTitle = famTitleInput.value.trim() || "Comptes de la famille"; persistConfig(); });
+
+/* ---------------- Catégories ---------------- */
+function addCategory(){
+  const nameInput = document.getElementById("newCatName");
+  const typeInput = document.getElementById("newCatType");
+  const name = nameInput.value.trim();
+  if(!name) return;
+  state.categories.push({ id: uid(), name, type: typeInput.value });
+  nameInput.value = "";
+  persistConfig();
+  renderAll();
+}
+function removeCategory(id){
+  state.categories = state.categories.filter(c=>c.id!==id);
+  state.rules = state.rules.filter(r=>r.categoryId!==id);
+  const affected = state.transactions.filter(t=>t.categoryId===id);
+  affected.forEach(t=>{ t.categoryId=""; t.source=""; });
+  persistConfig();
+  persistTxBulk(affected);
+  renderAll();
+}
+function renderCategories(){
+  const tbody = document.getElementById("catTable");
+  tbody.innerHTML = "";
+  const sorted = [...state.categories].sort((a,b)=> (a.group||"").localeCompare(b.group||"") || a.name.localeCompare(b.name));
+  sorted.forEach(cat=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${cat.group ? `<span class="hint" style="margin:0;">${cat.group} ·</span> ` : ""}${cat.name}</td><td>${cat.type==='revenu'?'Revenu':'Dépense'}</td>
+      <td><button class="icon-btn" onclick="removeCategory('${cat.id}')">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+  const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
+  document.getElementById("newRuleCategory").innerHTML = catOptions || '<option value="">Aucune catégorie</option>';
+  document.getElementById("filterCategory").innerHTML = '<option value="">Toutes catégories</option><option value="__none__">Non catégorisé</option>' + catOptions;
+}
+
+/* ---------------- Règles ---------------- */
+function addRule(){
+  const kwInput = document.getElementById("newRuleKeyword");
+  const catSel = document.getElementById("newRuleCategory");
+  const keyword = kwInput.value.trim();
+  if(!keyword || !catSel.value) return;
+  state.rules.push({ id: uid(), keyword, categoryId: catSel.value });
+  kwInput.value = "";
+  persistConfig();
+  renderRules();
+}
+function removeRule(id){ state.rules = state.rules.filter(r=>r.id!==id); persistConfig(); renderRules(); }
+function catName(id){ const c = state.categories.find(c=>c.id===id); return c ? c.name : ""; }
+function renderRules(){
+  const tbody = document.getElementById("ruleTable");
+  tbody.innerHTML = "";
+  if(state.rules.length===0){ tbody.innerHTML = '<tr><td colspan="3" class="empty">Aucune règle pour le moment.</td></tr>'; return; }
+  state.rules.forEach(r=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.keyword}</td><td>${catName(r.categoryId)}</td>
+      <td><button class="icon-btn" onclick="removeRule('${r.id}')">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+function matchRule(label){
+  const upper = (label||"").toUpperCase();
+  for(const r of state.rules){
+    if(upper.includes(r.keyword.toUpperCase())) return r.categoryId;
+  }
+  return "";
+}
+function reapplyRules(){
+  const changed = [];
+  state.transactions.forEach(t=>{
+    if(!t.categoryId){
+      const cid = matchRule(t.label);
+      if(cid){ t.categoryId = cid; t.source = "rule"; changed.push(t); }
+    }
+  });
+  persistTxBulk(changed);
+  renderAll();
+  alert(changed.length + " opération(s) classée(s) par les règles.");
+}
+
+/* ---------------- Import CSV ---------------- */
+let parsedRows = null, parsedHeaders = null;
+
+const dropZone = document.getElementById("dropZone");
+["dragover","dragleave","drop"].forEach(evt=>{
+  dropZone.addEventListener(evt, e=>{
+    e.preventDefault();
+    dropZone.classList.toggle("drag", evt==="dragover");
+    if(evt==="drop" && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+});
+
+function handleFile(file){
+  if(!file) return;
+  Papa.parse(file, {
+    header: false,
+    skipEmptyLines: true,
+    delimitersToGuess: [',',';','\t','|'],
+    complete: (res)=>{
+      const raw = res.data;
+      if(!raw || raw.length === 0){ alert("Fichier vide ou illisible."); return; }
+      // Certains logiciels (iFinance, etc.) ajoutent plusieurs lignes d'info avant
+      // la vraie ligne d'en-têtes : on cherche la première ligne contenant "Date".
+      let headerIdx = raw.findIndex(row => row.some(cell => (cell||"").trim().toLowerCase() === "date"));
+      if(headerIdx === -1) headerIdx = 0;
+      const headers = raw[headerIdx].map(h => (h||"").trim());
+      parsedHeaders = headers;
+      parsedRows = raw.slice(headerIdx+1).map(arr=>{
+        const obj = {};
+        headers.forEach((h,i)=>{ obj[h] = arr[i] !== undefined ? arr[i] : ""; });
+        return obj;
+      }).filter(row => Object.values(row).some(v => (v||"").trim() !== ""));
+
+      const preambleHint = document.getElementById("importPreambleHint");
+      if(headerIdx > 0){
+        preambleHint.style.display = "block";
+        preambleHint.textContent = `${headerIdx} ligne(s) d'en-tête du fichier ignorée(s) avant le tableau des opérations.`;
+      }else{
+        preambleHint.style.display = "none";
+      }
+
+      if(parsedRows.length === 0){ alert("Aucune opération trouvée dans ce fichier."); return; }
+      showMapping();
+    },
+    error: ()=> alert("Impossible de lire ce fichier CSV.")
+  });
+}
+
+function guessColumn(headers, candidates){
+  for(const cand of candidates){
+    const found = headers.find(h => h.trim().toLowerCase() === cand);
+    if(found) return found;
+  }
+  for(const cand of candidates){
+    const found = headers.find(h => h.trim().toLowerCase().includes(cand));
+    if(found) return found;
+  }
+  return headers[0] || "";
+}
+
+function showMapping(){
+  document.getElementById("mappingBox").style.display = "block";
+  const opts = parsedHeaders.map(h=>`<option value="${h}">${h}</option>`).join("");
+  ["mapDate","mapLabel","mapAmount","mapDebit","mapCredit"].forEach(id=>{
+    document.getElementById(id).innerHTML = opts;
+  });
+  document.getElementById("mapCategory").innerHTML = '<option value="">Aucune</option>' + opts;
+
+  document.getElementById("mapDate").value = guessColumn(parsedHeaders, ["date","date opération","date operation"]);
+  document.getElementById("mapLabel").value = guessColumn(parsedHeaders, ["libellé","libelle","label","description","intitulé","intitule","libellé de l'opération"]);
+  document.getElementById("mapAmount").value = guessColumn(parsedHeaders, ["montant","amount"]);
+  document.getElementById("mapDebit").value = guessColumn(parsedHeaders, ["débit","debit"]);
+  document.getElementById("mapCredit").value = guessColumn(parsedHeaders, ["crédit","credit"]);
+  const guessedCat = guessColumn(parsedHeaders, ["catégorie","categorie","category"]);
+  document.getElementById("mapCategory").value = parsedHeaders.includes(guessedCat) ? guessedCat : "";
+
+  const hasSplit = parsedHeaders.some(h=>/d[ée]bit/i.test(h)) && parsedHeaders.some(h=>/cr[ée]dit/i.test(h));
+  document.getElementById("mapAmountMode").value = hasSplit ? "split" : "single";
+  toggleAmountMode();
+  renderPreview();
+}
+
+function toggleAmountMode(){
+  const split = document.getElementById("mapAmountMode").value === "split";
+  document.getElementById("mapAmountSingleBox").style.display = split ? "none" : "block";
+  document.getElementById("mapDebitBox").style.display = split ? "block" : "none";
+  document.getElementById("mapCreditBox").style.display = split ? "block" : "none";
+  renderPreview();
+}
+["mapDate","mapLabel","mapAmount","mapDebit","mapCredit","mapCategory"].forEach(id=>{
+  document.addEventListener("change", (e)=>{ if(e.target.id===id) renderPreview(); });
+});
+
+function parseFrenchNumber(str){
+  if(str === null || str === undefined) return NaN;
+  let s = String(str).trim().replace(/\s/g,"").replace(/€/g,"");
+  if(s === "") return NaN;
+  if(s.includes(",") && s.includes(".")){
+    s = s.replace(/\./g,"").replace(",", ".");
+  }else if(s.includes(",")){
+    s = s.replace(",", ".");
+  }
+  return parseFloat(s);
+}
+
+function parseFlexDate(str){
+  if(!str) return "";
+  const s = String(str).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if(m) return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})$/);
+  if(m) return `20${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+  return s;
+}
+
+function buildRowAmount(row){
+  const mode = document.getElementById("mapAmountMode").value;
+  if(mode === "split"){
+    const debit = parseFrenchNumber(row[document.getElementById("mapDebit").value]);
+    const credit = parseFrenchNumber(row[document.getElementById("mapCredit").value]);
+    const d = isNaN(debit) ? 0 : -Math.abs(debit);
+    const c = isNaN(credit) ? 0 : Math.abs(credit);
+    return d !== 0 ? d : c;
+  }else{
+    const v = parseFrenchNumber(row[document.getElementById("mapAmount").value]);
+    return isNaN(v) ? 0 : v;
+  }
+}
+
+function renderPreview(){
+  if(!parsedRows) return;
+  const dateCol = document.getElementById("mapDate").value;
+  const labelCol = document.getElementById("mapLabel").value;
+  const catCol = document.getElementById("mapCategory").value;
+  const rows = parsedRows.slice(0,5);
+  let html = "<thead><tr><th>Date</th><th>Libellé</th><th class='num'>Montant</th>" + (catCol?"<th>Catégorie (fichier)</th>":"") + "</tr></thead><tbody>";
+  rows.forEach(r=>{
+    const amt = buildRowAmount(r);
+    html += `<tr><td>${parseFlexDate(r[dateCol])}</td><td>${(r[labelCol]||"").slice(0,60)}</td><td class="num">${euro(amt)}</td>${catCol?`<td>${(r[catCol]||"—")}</td>`:""}</tr>`;
+  });
+  html += "</tbody>";
+  document.getElementById("previewTable").innerHTML = html;
+  document.getElementById("importSummary").textContent =
+    `Aperçu des 5 premières lignes sur ${parsedRows.length} au total. Vérifiez que les colonnes correspondent bien.`;
+}
+
+/* Retrouve une catégorie existante (par groupe+nom, insensible à la casse) ou en crée une. */
+function findOrCreateCategory(rawValue, amount){
+  const value = (rawValue||"").trim();
+  if(!value) return "";
+  const parts = value.split(":").map(p=>p.trim()).filter(Boolean);
+  if(parts.length === 0) return "";
+  const group = parts.length > 1 ? parts[0] : "";
+  const name = parts.length > 1 ? parts.slice(1).join(" / ") : parts[0];
+  const key = (group+"|"+name).toLowerCase();
+  let cat = state.categories.find(c => ((c.group||"")+"|"+c.name).toLowerCase() === key);
+  if(!cat){
+    cat = { id: uid(), name, group, type: amount >= 0 ? "revenu" : "depense" };
+    state.categories.push(cat);
+  }
+  return cat.id;
+}
+
+function confirmImport(){
+  if(!parsedRows) return;
+  const dateCol = document.getElementById("mapDate").value;
+  const labelCol = document.getElementById("mapLabel").value;
+  const catCol = document.getElementById("mapCategory").value;
+  const existingHashes = new Set(state.transactions.map(t=>t.hash));
+  const categoriesBefore = state.categories.length;
+  const newTxs = [];
+  let added = 0, skipped = 0, fromFile = 0;
+  parsedRows.forEach(r=>{
+    const date = parseFlexDate(r[dateCol]);
+    const label = (r[labelCol]||"").trim();
+    const amount = buildRowAmount(r);
+    if(!date || !label || amount === 0) { if(!date && !label) return; }
+    const hash = date+"|"+label+"|"+amount.toFixed(2);
+    if(existingHashes.has(hash)){ skipped++; return; }
+    existingHashes.add(hash);
+
+    let categoryId = "", source = "";
+    if(catCol && r[catCol] && r[catCol].trim()){
+      categoryId = findOrCreateCategory(r[catCol], amount);
+      if(categoryId){ source = "import"; fromFile++; }
+    }
+    if(!categoryId){
+      categoryId = matchRule(label);
+      if(categoryId) source = "rule";
+    }
+
+    const tx = { id: uid(), date, label, amount, categoryId, source, hash };
+    state.transactions.push(tx);
+    newTxs.push(tx);
+    added++;
+  });
+  if(state.categories.length !== categoriesBefore) persistConfig();
+  persistTxBulk(newTxs);
+  parsedRows = null;
+  document.getElementById("mappingBox").style.display = "none";
+  document.getElementById("csvFile").value = "";
+  renderAll();
+  alert(`${added} opération(s) importée(s) (dont ${fromFile} déjà catégorisée(s) depuis le fichier). ${skipped} doublon(s) ignoré(s).`);
+  document.querySelector('nav.tabs button[data-view="transactions"]').click();
+}
+
+/* ---------------- Transactions ---------------- */
+function monthKey(date){ return (date||"").slice(0,7); }
+
+function renderMonthFilterOptions(){
+  const months = Array.from(new Set(state.transactions.map(t=>monthKey(t.date)).filter(Boolean))).sort().reverse();
+  const opts = '<option value="">Tous les mois</option>' + months.map(m=>`<option value="${m}">${m}</option>`).join("");
+  const filterMonth = document.getElementById("filterMonth");
+  const prev = filterMonth.value;
+  filterMonth.innerHTML = opts;
+  if(months.includes(prev)) filterMonth.value = prev;
+
+  const dashMonth = document.getElementById("dashMonth");
+  const prevD = dashMonth.value;
+  dashMonth.innerHTML = '<option value="">Tous les mois</option>' + months.map(m=>`<option value="${m}">${m}</option>`).join("");
+  if(months.includes(prevD)) dashMonth.value = prevD; else if(months[0]) dashMonth.value = months[0];
+}
+
+function setCategoryOnTx(id, categoryId){
+  const t = state.transactions.find(t=>t.id===id);
+  if(!t) return;
+  t.categoryId = categoryId;
+  t.source = categoryId ? "manual" : "";
+  persistTxUpsert(t);
+  renderTransactions();
+}
+function removeTx(id){
+  state.transactions = state.transactions.filter(t=>t.id!==id);
+  persistTxDelete(id);
+  renderAll();
+}
+
+function renderTransactions(){
+  renderMonthFilterOptions();
+  const search = (document.getElementById("filterSearch").value||"").toLowerCase();
+  const catFilter = document.getElementById("filterCategory").value;
+  const monthFilter = document.getElementById("filterMonth").value;
+
+  let rows = [...state.transactions].sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+  if(search) rows = rows.filter(t=>t.label.toLowerCase().includes(search));
+  if(catFilter === "__none__") rows = rows.filter(t=>!t.categoryId);
+  else if(catFilter) rows = rows.filter(t=>t.categoryId === catFilter);
+  if(monthFilter) rows = rows.filter(t=>monthKey(t.date) === monthFilter);
+
+  const tbody = document.getElementById("txTable");
+  tbody.innerHTML = "";
+  const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
+  rows.forEach(t=>{
+    const tr = document.createElement("tr");
+    const badge = t.source === "rule" ? '<span class="tag rule">règle</span>'
+      : t.source === "ai" ? '<span class="tag ai">IA</span>'
+      : t.source === "import" ? '<span class="tag import">fichier</span>'
+      : t.source === "manual" ? '<span class="tag manual">manuel</span>'
+      : '<span class="tag none">à trier</span>';
+    tr.innerHTML = `
+      <td>${t.date||"—"}</td>
+      <td>${t.label}</td>
+      <td class="num amt ${t.amount>=0?'pos':'neg'}">${euro(t.amount)}</td>
+      <td><select class="catsel" onchange="setCategoryOnTx('${t.id}', this.value)">
+            <option value="">—</option>${catOptions}
+          </select></td>
+      <td>${badge}</td>
+      <td><button class="icon-btn" onclick="removeTx('${t.id}')">✕</button></td>`;
+    tr.querySelector("select").value = t.categoryId || "";
+    tbody.appendChild(tr);
+  });
+  document.getElementById("txEmpty").style.display = rows.length ? "none" : "block";
+
+  const uncatCount = state.transactions.filter(t=>!t.categoryId).length;
+  document.getElementById("aiSortBtn").disabled = uncatCount === 0;
+  renderKpis();
+}
+
+function renderKpis(){
+  const totalIn = state.transactions.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const totalOut = state.transactions.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0);
+  document.getElementById("kpiIn").textContent = euro(totalIn);
+  document.getElementById("kpiOut").textContent = euro(Math.abs(totalOut));
+  const net = totalIn + totalOut;
+  const netEl = document.getElementById("kpiNet");
+  netEl.textContent = (net>=0?"+":"") + euro(net);
+  netEl.className = "v " + (net>=0 ? "pos" : "neg");
+}
+
+/* ---------------- Tri IA ---------------- */
+let sampleCap = null;
+(async ()=>{
+  try{
+    if(window.claude && window.claude.use){
+      sampleCap = await window.claude.use("sample");
+    }
+  }catch(e){ sampleCap = null; }
+  updateAiAvailability();
+})();
+
+const ARTIFACT_URL = "https://claude.ai/artifact/Vk1LQzsmn8knYDhC71VdZJ";
+
+function updateAiAvailability(){
+  const hint = document.getElementById("aiHint");
+  if(!sampleCap){
+    hint.style.display = "block";
+    hint.innerHTML = "Le tri par IA n'est disponible que lorsque cet outil est ouvert via son lien Claude publié. " +
+      `<a href="${ARTIFACT_URL}" target="_blank" rel="noopener" style="color:var(--green); font-weight:600;">Ouvrir l'outil en ligne pour trier avec l'IA →</a>`;
+    document.getElementById("aiSortBtn").title = "Indisponible hors du lien Claude";
+  }else{
+    hint.style.display = "none";
+  }
+}
+
+async function runAiSort(){
+  if(!sampleCap){
+    if(confirm("Le tri par IA n'est disponible que via le lien Claude publié. Ouvrir cet outil en ligne dans un nouvel onglet ?")){
+      window.open(ARTIFACT_URL, "_blank", "noopener");
+    }
+    return;
+  }
+  const uncategorized = state.transactions.filter(t=>!t.categoryId).slice(0, 40);
+  if(uncategorized.length === 0){ alert("Tout est déjà catégorisé !"); return; }
+  const btn = document.getElementById("aiSortBtn");
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Analyse en cours...";
+
+  const catList = state.categories.map(c=>`${c.id}: ${c.name} (${c.type})`).join("\n");
+  const txList = uncategorized.map((t,i)=>`${i}. "${t.label}" — ${t.amount.toFixed(2)} €`).join("\n");
+  const genericWords = ["CARTE","PRLV","VIR","VIREMENT","PAIEMENT","ACHAT","CB"];
+
+  const prompt = `Tu classes des opérations bancaires d'une famille française dans des catégories existantes.
+Catégories disponibles (id: nom (type)) :
+${catList}
+
+Opérations à classer (index. libellé — montant ; montant négatif = dépense, positif = revenu) :
+${txList}
+
+Pour chaque opération, choisis l'id de catégorie le plus pertinent (n'invente pas d'id). Quand le libellé contient un nom d'enseigne ou de service clairement identifiable (pas un mot générique bancaire comme CARTE, PRLV, VIR, VIREMENT, PAIEMENT), propose aussi un "keyword" : un extrait court et distinctif du libellé (le nom du commerçant/service, tel qu'il apparaît dans le libellé) qui permettrait de reconnaître automatiquement des opérations similaires à l'avenir. Laisse "keyword" vide si le libellé est trop générique ou ponctuel pour servir de règle.
+
+Réponds UNIQUEMENT avec un objet JSON de la forme {"assignments":[{"index":0,"categoryId":"...","keyword":"..."}]}, un élément par opération.`;
+
+  try{
+    const result = await sampleCap.json(prompt, { modelTier: "quick" });
+    const assignments = (result && result.assignments) || [];
+    const validIds = new Set(state.categories.map(c=>c.id));
+    const existingKeywords = new Set(state.rules.map(r=>r.keyword.toUpperCase()));
+    let applied = 0;
+    const changed = [];
+    const ruleCandidates = [];
+    const seenKeywords = new Set();
+    assignments.forEach(a=>{
+      const tx = uncategorized[a.index];
+      if(tx && validIds.has(a.categoryId)){
+        tx.categoryId = a.categoryId;
+        tx.source = "ai";
+        changed.push(tx);
+        applied++;
+
+        const kw = (a.keyword||"").trim();
+        const kwUpper = kw.toUpperCase();
+        if(kw.length >= 3
+           && !genericWords.includes(kwUpper)
+           && tx.label.toUpperCase().includes(kwUpper)
+           && !existingKeywords.has(kwUpper)
+           && !seenKeywords.has(kwUpper)){
+          seenKeywords.add(kwUpper);
+          ruleCandidates.push({ keyword: kw, categoryId: a.categoryId, sampleLabel: tx.label });
+        }
+      }
+    });
+    persistTxBulk(changed);
+    renderAll();
+    if(ruleCandidates.length){
+      showAiRulesReview(ruleCandidates);
+      alert(applied + " opération(s) classée(s) par l'IA. " + ruleCandidates.length + " règle(s) proposée(s) — à valider ci-dessous pour les prochains imports.");
+    }else{
+      alert(applied + " opération(s) classée(s) par l'IA. Vérifiez et ajustez si besoin.");
+    }
+  }catch(err){
+    alert("Le tri par IA a échoué (" + (err && err.code || "erreur") + "). Réessayez plus tard.");
+  }finally{
+    btn.disabled = false;
+    btn.textContent = originalText;
+    renderTransactions();
+  }
+}
+
+let pendingAiRules = [];
+function showAiRulesReview(candidates){
+  pendingAiRules = candidates;
+  const box = document.getElementById("aiRulesReview");
+  const list = document.getElementById("aiRulesList");
+  list.innerHTML = candidates.map((c,i)=>`
+    <label class="chk on" style="display:flex; align-items:center; gap:8px; padding:8px 10px; margin-bottom:6px; border-radius:4px; background:var(--surface-2);">
+      <input type="checkbox" data-idx="${i}" checked style="width:auto;">
+      <span><strong>${c.keyword}</strong> → ${catName(c.categoryId)}</span>
+      <span class="hint" style="margin:0 0 0 auto;">ex. « ${c.sampleLabel.slice(0,40)} »</span>
+    </label>`).join("");
+  box.style.display = "block";
+}
+function confirmAiRules(){
+  const checks = document.querySelectorAll("#aiRulesList input[type=checkbox]");
+  let added = 0;
+  checks.forEach(chk=>{
+    if(chk.checked){
+      const c = pendingAiRules[Number(chk.dataset.idx)];
+      if(c){ state.rules.push({ id: uid(), keyword: c.keyword, categoryId: c.categoryId }); added++; }
+    }
+  });
+  if(added){ persistConfig(); renderRules(); }
+  dismissAiRules();
+  alert(added + " règle(s) ajoutée(s).");
+}
+function dismissAiRules(){
+  pendingAiRules = [];
+  document.getElementById("aiRulesReview").style.display = "none";
+  document.getElementById("aiRulesList").innerHTML = "";
+}
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(){
+  const monthFilter = document.getElementById("dashMonth").value;
+  const rows = monthFilter ? state.transactions.filter(t=>monthKey(t.date)===monthFilter) : state.transactions;
+
+  const expenseCats = state.categories.filter(c=>c.type==="depense");
+  const box = document.getElementById("dashCats");
+  box.innerHTML = "";
+  const totalsByCat = expenseCats.map(cat=>{
+    const sum = rows.filter(t=>t.categoryId===cat.id).reduce((s,t)=>s+Math.abs(Math.min(t.amount,0)) + (t.amount<0?0:0),0);
+    const total = rows.filter(t=>t.categoryId===cat.id && t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    return { cat, total };
+  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+
+  const maxVal = Math.max(...totalsByCat.map(x=>x.total), 1);
+  document.getElementById("dashCatsEmpty").style.display = totalsByCat.length ? "none" : "block";
+  totalsByCat.forEach(x=>{
+    const pct = (x.total/maxVal)*100;
+    const row = document.createElement("div");
+    row.className = "cat-row";
+    row.innerHTML = `<div class="top"><span class="name">${x.cat.name}</span><span class="amt">${euro(x.total)}</span></div>
+      <div class="bar-track"><div class="bar-fill exp" style="width:${pct}%"></div></div>`;
+    box.appendChild(row);
+  });
+
+  const months = Array.from(new Set(state.transactions.map(t=>monthKey(t.date)).filter(Boolean))).sort().reverse();
+  const mtbody = document.getElementById("monthTable");
+  mtbody.innerHTML = "";
+  document.getElementById("monthEmpty").style.display = months.length ? "none" : "block";
+  months.forEach(m=>{
+    const mrows = state.transactions.filter(t=>monthKey(t.date)===m);
+    const inSum = mrows.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+    const outSum = mrows.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0);
+    const net = inSum+outSum;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${m}</td><td class="num amt pos">${euro(inSum)}</td><td class="num amt neg">${euro(Math.abs(outSum))}</td>
+      <td class="num" style="font-weight:600; color:${net>=0?'var(--green)':'var(--terracotta)'}">${(net>=0?"+":"")+euro(net)}</td>`;
+    mtbody.appendChild(tr);
+  });
+}
+
+/* ---------------- Export / Import sauvegarde ---------------- */
+let downloadsCap = null;
+(async ()=>{
+  try{
+    if(window.claude && window.claude.use){
+      downloadsCap = await window.claude.use("downloads");
+    }
+  }catch(e){ downloadsCap = null; }
+})();
+
+async function saveFile(filename, text, mime){
+  if(downloadsCap){
+    try{
+      await downloadsCap.save({ filename, data: text });
+      return;
+    }catch(e){ /* on retente en local ci-dessous */ }
+  }
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportBackup(){
+  const safe = (state.famTitle||"comptes").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+  saveFile((safe||"comptes")+"-sauvegarde.json", JSON.stringify(state, null, 2), "application/json");
+}
+
+function importBackup(file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const parsed = JSON.parse(e.target.result);
+      if(!parsed || typeof parsed !== "object") throw new Error("format invalide");
+      state.famTitle = parsed.famTitle || state.famTitle;
+      state.categories = parsed.categories || state.categories;
+      state.rules = parsed.rules || state.rules;
+      const importedTxs = parsed.transactions || [];
+      importedTxs.forEach(t=>{
+        const idx = state.transactions.findIndex(x=>x.id===t.id);
+        if(idx>=0) state.transactions[idx] = t; else state.transactions.push(t);
+      });
+      persistConfig();
+      persistTxBulk(importedTxs);
+      famTitleInput.value = state.famTitle;
+      renderAll();
+    }catch(err){
+      alert("Ce fichier ne ressemble pas à une sauvegarde valide.");
+    }
+  };
+  reader.readAsText(file);
+  document.getElementById("importBackupFile").value = "";
+}
+
+function exportCsv(){
+  const header = "Date;Libelle;Montant;Categorie;Origine\n";
+  const lines = [...state.transactions].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(t=>{
+    const cat = catName(t.categoryId) || "Non categorise";
+    const src = t.source === "rule" ? "Regle" : t.source === "ai" ? "IA" : t.source === "import" ? "Fichier" : t.source === "manual" ? "Manuel" : "";
+    const label = (t.label||"").replace(/;/g,",");
+    return `${t.date};${label};${t.amount.toFixed(2).replace(".",",")};${cat};${src}`;
+  }).join("\n");
+  saveFile("operations-categorisees.csv", header+lines, "text/csv;charset=utf-8");
+}
+
+/* ---------------- Rendu global ---------------- */
+function renderAll(){
+  renderCategories();
+  renderRules();
+  renderTransactions();
+  renderDashboard();
+}
+initStorage();
+</script>
+</body>
+</html>
