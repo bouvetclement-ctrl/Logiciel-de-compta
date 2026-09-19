@@ -203,7 +203,7 @@
       <button class="btn secondary small" onclick="exportBackup()">⭳ Exporter la sauvegarde</button>
       <button class="btn secondary small" onclick="document.getElementById('importBackupFile').click()">⭱ Importer une sauvegarde</button>
       <input type="file" id="importBackupFile" accept="application/json" style="display:none" onchange="importBackup(this.files[0])">
-      <button class="btn secondary small" style="color:var(--terracotta); border-color:var(--terracotta);" onclick="resetAllData()">🗑️ Tout réinitialiser</button>
+      <button class="btn secondary small" style="color:var(--terracotta); border-color:var(--terracotta);" onclick="resetTransactionsData()">🗑️ Réinitialiser les opérations</button>
     </div>
   </div>
 
@@ -244,13 +244,10 @@
           <p class="sub" id="duplicatesIntro" style="margin-bottom:10px;"></p>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>Date</th><th>Libellé</th><th class="num">Montant</th></tr></thead>
+              <thead><tr><th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Déjà présent</th><th>Décision</th></tr></thead>
               <tbody id="duplicatesTable"></tbody>
             </table>
           </div>
-          <label class="chk" style="display:inline-flex; margin-top:10px;">
-            <input type="checkbox" id="importDupesToo" style="width:auto;"> Importer quand même ces doublons
-          </label>
         </div>
         <button class="btn" onclick="confirmImport()" style="margin-top:12px;">Importer ces opérations</button>
       </div>
@@ -333,7 +330,10 @@
   <!-- ============ REGLES & CATEGORIES ============ -->
   <section class="view" id="view-regles">
     <div class="card">
-      <h2>Catégories</h2>
+      <div class="toolbar">
+        <h2 style="margin:0;">Catégories</h2>
+        <button class="btn secondary small" style="color:var(--terracotta); border-color:var(--terracotta);" onclick="resetCategoriesData()">🗑️ Réinitialiser les catégories</button>
+      </div>
       <p class="sub">La liste des postes utilisés pour classer les opérations.</p>
       <div class="grid-form">
         <div class="field"><label>Catégorie principale (optionnel)</label><input type="text" id="newCatGroup" placeholder="Ex : Logement"></div>
@@ -681,6 +681,14 @@ function reapplyRules(){
 
 /* ---------------- Import CSV ---------------- */
 let parsedRows = null, parsedHeaders = null;
+let duplicateMatches = []; // parallèle à parsedRows : null ou {idx,date,label,amount,matchDate}
+
+function daysBetween(dateStrA, dateStrB){
+  const a = new Date(dateStrA + "T00:00:00");
+  const b = new Date(dateStrB + "T00:00:00");
+  if(isNaN(a) || isNaN(b)) return Infinity;
+  return Math.abs(a - b) / 86400000;
+}
 
 const dropZone = document.getElementById("dropZone");
 ["dragover","dragleave","drop"].forEach(evt=>{
@@ -800,35 +808,44 @@ function checkDuplicates(){
   if(!parsedRows) return;
   const dateCol = document.getElementById("mapDate").value;
   const labelCol = document.getElementById("mapLabel").value;
-  const existingHashes = new Set(state.transactions.map(t=>t.hash));
-  const seenInFile = new Set();
-  const dups = [];
-  parsedRows.forEach(r=>{
+
+  // Bassin de référence : les opérations déjà enregistrées, complété au fil de l'eau
+  // par les lignes du fichier lui-même (pour détecter aussi les doublons internes au fichier).
+  const pool = state.transactions.map(t=>({ date: t.date, label: t.label, amount: t.amount }));
+
+  duplicateMatches = parsedRows.map((r, idx)=>{
     const date = parseFlexDate(r[dateCol]);
     const label = (r[labelCol]||"").trim();
     const amount = buildRowAmount(r);
-    if(!date || !label) return;
-    const hash = date+"|"+label+"|"+amount.toFixed(2);
-    if(existingHashes.has(hash) || seenInFile.has(hash)){
-      dups.push({ date, label, amount });
-    }
-    seenInFile.add(hash);
+    if(!date || !label){ return null; }
+    const match = pool.find(p =>
+      p.label.trim().toLowerCase() === label.toLowerCase() &&
+      Math.abs(p.amount - amount) < 0.005 &&
+      p.date && daysBetween(p.date, date) <= 2
+    );
+    pool.push({ date, label, amount }); // sert aussi de référence pour les lignes suivantes du fichier
+    return match ? { idx, date, label, amount, matchDate: match.date } : null;
   });
 
+  const dups = duplicateMatches.filter(Boolean);
   const box = document.getElementById("duplicatesBox");
-  const dupImportChk = document.getElementById("importDupesToo");
   if(dups.length === 0){
     box.style.display = "none";
-    dupImportChk.checked = false;
     return;
   }
   box.style.display = "block";
   document.getElementById("duplicatesIntro").textContent =
-    `${dups.length} opération(s) de ce fichier correspondent exactement à une opération déjà présente (même date, libellé et montant), ou sont en double dans le fichier. Par défaut, elles ne seront pas réimportées.`;
-  const shown = dups.slice(0, 50);
+    `${dups.length} opération(s) de ce fichier ressemblent à une opération déjà enregistrée (même libellé, même montant, à 2 jours d'intervalle maximum). Vérifiez-les une par une ci-dessous : par défaut elles ne seront pas réimportées.`;
+  const shown = dups.slice(0, 80);
   document.getElementById("duplicatesTable").innerHTML = shown.map(d=>
-    `<tr><td>${d.date}</td><td>${d.label}</td><td class="num">${euro(d.amount)}</td></tr>`
-  ).join("") + (dups.length > shown.length ? `<tr><td colspan="3" class="hint">… et ${dups.length - shown.length} autre(s)</td></tr>` : "");
+    `<tr style="background:rgba(181,83,60,.10);">
+       <td>${d.date}</td><td>${d.label}</td><td class="num">${euro(d.amount)}</td>
+       <td class="hint" style="white-space:nowrap;">déjà le ${d.matchDate}</td>
+       <td><label class="chk" style="display:inline-flex; white-space:nowrap;">
+             <input type="checkbox" class="dupImportChk" data-idx="${d.idx}" style="width:auto;"> Importer quand même
+           </label></td>
+     </tr>`
+  ).join("") + (dups.length > shown.length ? `<tr><td colspan="5" class="hint">… et ${dups.length - shown.length} autre(s), traitées comme doublons par défaut</td></tr>` : "");
 }
 
 function parseFrenchNumber(str){
@@ -908,23 +925,23 @@ function confirmImport(){
   const dateCol = document.getElementById("mapDate").value;
   const labelCol = document.getElementById("mapLabel").value;
   const catCol = document.getElementById("mapCategory").value;
-  const importDupesToo = document.getElementById("importDupesToo").checked;
-  const existingHashes = new Set(state.transactions.map(t=>t.hash));
+  const forceImportIdxs = new Set(
+    Array.from(document.querySelectorAll(".dupImportChk:checked")).map(chk=>Number(chk.dataset.idx))
+  );
   const categoriesBefore = state.categories.length;
   const batchId = uid();
   const newTxs = [];
   let added = 0, skipped = 0, fromFile = 0;
-  parsedRows.forEach(r=>{
+  parsedRows.forEach((r, idx)=>{
     const date = parseFlexDate(r[dateCol]);
     const label = (r[labelCol]||"").trim();
     const amount = buildRowAmount(r);
     if(!date || !label || amount === 0) { if(!date && !label) return; }
-    const hash = date+"|"+label+"|"+amount.toFixed(2);
-    if(!importDupesToo){
-      if(existingHashes.has(hash)){ skipped++; return; }
-      existingHashes.add(hash);
-    }
 
+    const isDuplicate = !!(duplicateMatches[idx]);
+    if(isDuplicate && !forceImportIdxs.has(idx)){ skipped++; return; }
+
+    const hash = date+"|"+label+"|"+amount.toFixed(2);
     let categoryId = "", source = "";
     if(catCol && r[catCol] && r[catCol].trim()){
       categoryId = findOrCreateCategory(r[catCol], amount);
@@ -946,6 +963,7 @@ function confirmImport(){
   if(state.categories.length !== categoriesBefore || added > 0) persistConfig();
   persistTxBulk(newTxs);
   parsedRows = null;
+  duplicateMatches = [];
   document.getElementById("mappingBox").style.display = "none";
   document.getElementById("duplicatesBox").style.display = "none";
   document.getElementById("csvFile").value = "";
@@ -1540,14 +1558,17 @@ async function saveFile(filename, text, mime){
   URL.revokeObjectURL(url);
 }
 
-function resetAllData(){
-  const warning = state.transactions.length
-    ? `Ceci supprime DÉFINITIVEMENT les ${state.transactions.length} opération(s), les catégories, les règles et l'historique d'import de ce navigateur`
-    : "Ceci réinitialise les catégories et règles";
+function resetTransactionsData(){
+  if(state.transactions.length === 0 && state.imports.length === 0){
+    alert("Il n'y a aucune opération à réinitialiser.");
+    return;
+  }
   const cloudNote = (storageMode === "google" && scriptUrl)
     ? " — et écrasera aussi la sauvegarde sur votre Google Drive connecté"
     : "";
-  const answer = prompt(warning + cloudNote + ".\n\nTapez RESET (en majuscules) pour confirmer :");
+  const answer = prompt(
+    `Ceci supprime DÉFINITIVEMENT les ${state.transactions.length} opération(s) et l'historique d'import de ce navigateur${cloudNote}. Les catégories et règles ne sont PAS touchées.\n\nTapez RESET (en majuscules) pour confirmer :`
+  );
   if(answer !== "RESET"){
     if(answer !== null) alert("Réinitialisation annulée : le texte tapé ne correspond pas.");
     return;
@@ -1555,16 +1576,38 @@ function resetAllData(){
   closeCategoryPicker();
   dismissAiRules();
   selectedIds.clear();
-  parsedRows = null; parsedHeaders = null; currentImportFileName = "";
+  parsedRows = null; parsedHeaders = null; currentImportFileName = ""; duplicateMatches = [];
   document.getElementById("mappingBox").style.display = "none";
   document.getElementById("duplicatesBox").style.display = "none";
   document.getElementById("csvFile").value = "";
 
-  state = defaultState();
+  state.transactions = [];
+  state.imports = [];
   saveLocal();
   if(storageMode === "google" && scriptUrl) schedulePersist();
   renderAll();
-  alert("Toutes les données ont été réinitialisées. Vous pouvez réimporter votre relevé depuis le début.");
+  alert("Toutes les opérations ont été supprimées. Vous pouvez réimporter votre relevé depuis le début.");
+}
+
+function resetCategoriesData(){
+  const cloudNote = (storageMode === "google" && scriptUrl)
+    ? " — et écrasera aussi la sauvegarde sur votre Google Drive connecté"
+    : "";
+  const answer = prompt(
+    `Ceci réinitialise les catégories (retour aux catégories par défaut) et supprime toutes les règles${cloudNote}. Les opérations déjà catégorisées perdront leur catégorie (mais restent dans le journal). Les opérations elles-mêmes ne sont PAS touchées.\n\nTapez RESET (en majuscules) pour confirmer :`
+  );
+  if(answer !== "RESET"){
+    if(answer !== null) alert("Réinitialisation annulée : le texte tapé ne correspond pas.");
+    return;
+  }
+  closeCategoryPicker();
+  state.categories = defaultCategories();
+  state.rules = [];
+  state.transactions.forEach(t=>{ t.categoryId = ""; t.source = ""; });
+  persistConfig();
+  persistTxBulk(state.transactions);
+  renderAll();
+  alert("Les catégories et règles ont été réinitialisées.");
 }
 
 function exportBackup(){
