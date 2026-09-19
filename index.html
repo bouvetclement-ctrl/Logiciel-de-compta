@@ -215,6 +215,19 @@
           <table id="previewTable"></table>
         </div>
         <p class="hint" id="importSummary"></p>
+        <div id="duplicatesBox" class="card" style="display:none; margin:14px 0; padding:14px 16px; background:var(--surface-2);">
+          <h2 style="font-size:15px; margin-bottom:6px;">⚠️ Doublons potentiels détectés</h2>
+          <p class="sub" id="duplicatesIntro" style="margin-bottom:10px;"></p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Date</th><th>Libellé</th><th class="num">Montant</th></tr></thead>
+              <tbody id="duplicatesTable"></tbody>
+            </table>
+          </div>
+          <label class="chk" style="display:inline-flex; margin-top:10px;">
+            <input type="checkbox" id="importDupesToo" style="width:auto;"> Importer quand même ces doublons
+          </label>
+        </div>
         <button class="btn" onclick="confirmImport()" style="margin-top:12px;">Importer ces opérations</button>
       </div>
     </div>
@@ -263,7 +276,7 @@
 
       <div id="bulkBar" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:10px 12px; margin-bottom:12px;">
         <strong id="bulkCount" style="font-size:13px;"></strong>
-        <select id="bulkCategorySelect" style="max-width:220px;"></select>
+        <input type="text" id="bulkCategorySelect" list="categoryDatalist" placeholder="Tapez pour rechercher…" style="max-width:220px;">
         <button class="btn small" onclick="bulkAssignCategory()">Assigner la catégorie</button>
         <button class="btn secondary small" onclick="bulkDeleteSelection()">Supprimer la sélection</button>
         <button class="btn secondary small" onclick="clearSelection()">Annuler la sélection</button>
@@ -314,7 +327,7 @@
       <p class="sub">Si le libellé d'une opération contient ce mot-clé (insensible à la casse), elle est classée automatiquement dans la catégorie associée, dès l'import.</p>
       <div class="grid-form">
         <div class="field"><label>Mot-clé dans le libellé</label><input type="text" id="newRuleKeyword" placeholder="Ex : CARREFOUR"></div>
-        <div class="field"><label>Catégorie</label><select id="newRuleCategory"></select></div>
+        <div class="field"><label>Catégorie</label><input type="text" id="newRuleCategory" list="categoryDatalist" placeholder="Tapez pour rechercher…"></div>
         <div class="field" style="align-self:end;"><button class="btn" onclick="addRule()">Ajouter</button></div>
       </div>
       <table>
@@ -348,6 +361,8 @@
       <div id="monthEmpty" class="empty">Pas encore de données.</div>
     </div>
   </section>
+
+  <datalist id="categoryDatalist"></datalist>
 
   <footer>Vos opérations restent dans ce navigateur. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
 </div>
@@ -541,6 +556,13 @@ function removeCategory(id){
   persistTxBulk(affected);
   renderAll();
 }
+function categoryLabel(cat){ return (cat.group ? cat.group + " · " : "") + cat.name; }
+function findCategoryByLabel(label){
+  const target = (label||"").trim().toLowerCase();
+  if(!target) return null;
+  return state.categories.find(c=>categoryLabel(c).toLowerCase() === target) || null;
+}
+
 function renderCategories(){
   const tbody = document.getElementById("catTable");
   tbody.innerHTML = "";
@@ -551,19 +573,22 @@ function renderCategories(){
       <td><button class="icon-btn" onclick="removeCategory('${cat.id}')">✕</button></td>`;
     tbody.appendChild(tr);
   });
-  const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
-  document.getElementById("newRuleCategory").innerHTML = catOptions || '<option value="">Aucune catégorie</option>';
+  document.getElementById("categoryDatalist").innerHTML =
+    state.categories.map(c=>`<option value="${categoryLabel(c)}">`).join("");
+  const catOptions = state.categories.map(c=>`<option value="${c.id}">${categoryLabel(c)}</option>`).join("");
   document.getElementById("filterCategory").innerHTML = '<option value="">Toutes catégories</option><option value="__none__">Non catégorisé</option>' + catOptions;
 }
 
 /* ---------------- Règles ---------------- */
 function addRule(){
   const kwInput = document.getElementById("newRuleKeyword");
-  const catSel = document.getElementById("newRuleCategory");
+  const catInput = document.getElementById("newRuleCategory");
   const keyword = kwInput.value.trim();
-  if(!keyword || !catSel.value) return;
-  state.rules.push({ id: uid(), keyword, categoryId: catSel.value });
+  const cat = findCategoryByLabel(catInput.value);
+  if(!keyword || !cat) return;
+  state.rules.push({ id: uid(), keyword, categoryId: cat.id });
   kwInput.value = "";
+  catInput.value = "";
   persistConfig();
   renderRules();
 }
@@ -702,6 +727,7 @@ function showMapping(){
   document.getElementById("mapAmountMode").value = hasSplit ? "split" : "single";
   toggleAmountMode();
   renderPreview();
+  checkDuplicates();
 }
 
 function toggleAmountMode(){
@@ -710,10 +736,46 @@ function toggleAmountMode(){
   document.getElementById("mapDebitBox").style.display = split ? "block" : "none";
   document.getElementById("mapCreditBox").style.display = split ? "block" : "none";
   renderPreview();
+  checkDuplicates();
 }
 ["mapDate","mapLabel","mapAmount","mapDebit","mapCredit","mapCategory"].forEach(id=>{
-  document.addEventListener("change", (e)=>{ if(e.target.id===id) renderPreview(); });
+  document.addEventListener("change", (e)=>{ if(e.target.id===id){ renderPreview(); checkDuplicates(); } });
 });
+
+function checkDuplicates(){
+  if(!parsedRows) return;
+  const dateCol = document.getElementById("mapDate").value;
+  const labelCol = document.getElementById("mapLabel").value;
+  const existingHashes = new Set(state.transactions.map(t=>t.hash));
+  const seenInFile = new Set();
+  const dups = [];
+  parsedRows.forEach(r=>{
+    const date = parseFlexDate(r[dateCol]);
+    const label = (r[labelCol]||"").trim();
+    const amount = buildRowAmount(r);
+    if(!date || !label) return;
+    const hash = date+"|"+label+"|"+amount.toFixed(2);
+    if(existingHashes.has(hash) || seenInFile.has(hash)){
+      dups.push({ date, label, amount });
+    }
+    seenInFile.add(hash);
+  });
+
+  const box = document.getElementById("duplicatesBox");
+  const dupImportChk = document.getElementById("importDupesToo");
+  if(dups.length === 0){
+    box.style.display = "none";
+    dupImportChk.checked = false;
+    return;
+  }
+  box.style.display = "block";
+  document.getElementById("duplicatesIntro").textContent =
+    `${dups.length} opération(s) de ce fichier correspondent exactement à une opération déjà présente (même date, libellé et montant), ou sont en double dans le fichier. Par défaut, elles ne seront pas réimportées.`;
+  const shown = dups.slice(0, 50);
+  document.getElementById("duplicatesTable").innerHTML = shown.map(d=>
+    `<tr><td>${d.date}</td><td>${d.label}</td><td class="num">${euro(d.amount)}</td></tr>`
+  ).join("") + (dups.length > shown.length ? `<tr><td colspan="3" class="hint">… et ${dups.length - shown.length} autre(s)</td></tr>` : "");
+}
 
 function parseFrenchNumber(str){
   if(str === null || str === undefined) return NaN;
@@ -792,6 +854,7 @@ function confirmImport(){
   const dateCol = document.getElementById("mapDate").value;
   const labelCol = document.getElementById("mapLabel").value;
   const catCol = document.getElementById("mapCategory").value;
+  const importDupesToo = document.getElementById("importDupesToo").checked;
   const existingHashes = new Set(state.transactions.map(t=>t.hash));
   const categoriesBefore = state.categories.length;
   const batchId = uid();
@@ -803,8 +866,10 @@ function confirmImport(){
     const amount = buildRowAmount(r);
     if(!date || !label || amount === 0) { if(!date && !label) return; }
     const hash = date+"|"+label+"|"+amount.toFixed(2);
-    if(existingHashes.has(hash)){ skipped++; return; }
-    existingHashes.add(hash);
+    if(!importDupesToo){
+      if(existingHashes.has(hash)){ skipped++; return; }
+      existingHashes.add(hash);
+    }
 
     let categoryId = "", source = "";
     if(catCol && r[catCol] && r[catCol].trim()){
@@ -828,6 +893,7 @@ function confirmImport(){
   persistTxBulk(newTxs);
   parsedRows = null;
   document.getElementById("mappingBox").style.display = "none";
+  document.getElementById("duplicatesBox").style.display = "none";
   document.getElementById("csvFile").value = "";
   renderAll();
   alert(`${added} opération(s) importée(s) (dont ${fromFile} déjà catégorisée(s) depuis le fichier). ${skipped} doublon(s) ignoré(s).`);
@@ -858,6 +924,16 @@ function setCategoryOnTx(id, categoryId){
   t.source = categoryId ? "manual" : "";
   persistTxUpsert(t);
   renderTransactions();
+}
+function setCategoryOnTxByLabel(id, label){
+  const trimmed = (label||"").trim();
+  if(trimmed === ""){ setCategoryOnTx(id, ""); return; }
+  const cat = findCategoryByLabel(trimmed);
+  if(cat){ setCategoryOnTx(id, cat.id); }
+  else{
+    alert("Catégorie inconnue : « " + trimmed + " ». Choisissez-en une dans la liste proposée.");
+    renderTransactions(); // remet l'ancienne valeur affichée
+  }
 }
 function removeTx(id){
   state.transactions = state.transactions.filter(t=>t.id!==id);
@@ -905,7 +981,6 @@ function renderTransactions(){
 
   const tbody = document.getElementById("txTable");
   tbody.innerHTML = "";
-  const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
 
   let lastMonth = null;
   rows.forEach(t=>{
@@ -932,12 +1007,11 @@ function renderTransactions(){
       <td>${t.date||"—"}</td>
       <td>${t.label}</td>
       <td class="num amt ${t.amount>=0?'pos':'neg'}">${euro(t.amount)}</td>
-      <td><select class="catsel" onchange="setCategoryOnTx('${t.id}', this.value)">
-            <option value="">—</option>${catOptions}
-          </select></td>
+      <td><input type="text" class="catsel" list="categoryDatalist" placeholder="—"
+            value="${t.categoryId ? categoryLabel(state.categories.find(c=>c.id===t.categoryId)||{name:''}) : ""}"
+            onchange="setCategoryOnTxByLabel('${t.id}', this.value)"></td>
       <td>${badge}</td>
       <td><button class="icon-btn" onclick="removeTx('${t.id}')">✕</button></td>`;
-    tr.querySelector("select").value = t.categoryId || "";
     tr.querySelector(".rowChk").addEventListener("change", (e)=>{
       if(e.target.checked) selectedIds.add(t.id); else selectedIds.delete(t.id);
       renderBulkBar();
@@ -972,16 +1046,15 @@ function renderBulkBar(){
   if(selectedIds.size === 0){ bar.style.display = "none"; return; }
   bar.style.display = "flex";
   document.getElementById("bulkCount").textContent = selectedIds.size + " opération(s) sélectionnée(s)";
-  const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
-  document.getElementById("bulkCategorySelect").innerHTML = '<option value="">Choisir une catégorie…</option>' + catOptions;
+  document.getElementById("bulkCategorySelect").value = "";
 }
 
 function bulkAssignCategory(){
-  const categoryId = document.getElementById("bulkCategorySelect").value;
-  if(!categoryId){ alert("Choisissez d'abord une catégorie."); return; }
+  const cat = findCategoryByLabel(document.getElementById("bulkCategorySelect").value);
+  if(!cat){ alert("Choisissez une catégorie dans la liste proposée."); return; }
   const changed = [];
   state.transactions.forEach(t=>{
-    if(selectedIds.has(t.id)){ t.categoryId = categoryId; t.source = "manual"; changed.push(t); }
+    if(selectedIds.has(t.id)){ t.categoryId = cat.id; t.source = "manual"; changed.push(t); }
   });
   persistTxBulk(changed);
   renderAll();
