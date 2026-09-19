@@ -208,6 +208,7 @@
     <button class="active" data-view="import">Import</button>
     <button data-view="transactions">Transactions</button>
     <button data-view="regles">Règles &amp; catégories</button>
+    <button data-view="budget">Budget</button>
     <button data-view="dashboard">Tableau de bord</button>
   </nav>
 
@@ -388,6 +389,63 @@
     </div>
   </section>
 
+  <!-- ============ BUDGET ============ -->
+  <section class="view" id="view-budget">
+    <div class="card">
+      <h2>Définir un budget</h2>
+      <p class="sub">Sur une catégorie principale entière (tous ses sous-postes cumulés) ou sur une sous-catégorie précise, mensuel ou annuel.</p>
+      <div class="grid-form">
+        <div class="field">
+          <label>Portée</label>
+          <select id="budgetScopeType" onchange="renderBudgetScopeOptions()">
+            <option value="group">Catégorie principale (tous les sous-postes)</option>
+            <option value="category">Sous-catégorie précise</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Laquelle ?</label>
+          <input type="text" id="budgetScopeSearch" list="budgetScopeDatalist" placeholder="Tapez pour rechercher…">
+          <datalist id="budgetScopeDatalist"></datalist>
+        </div>
+        <div class="field">
+          <label>Période</label>
+          <select id="budgetPeriod">
+            <option value="monthly">Mensuel</option>
+            <option value="annual">Annuel</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Montant cible (€)</label>
+          <input type="number" min="0" step="1" id="budgetAmount" placeholder="0">
+        </div>
+        <div class="field" style="align-self:end;"><button class="btn" onclick="addBudget()">Ajouter</button></div>
+      </div>
+      <table>
+        <thead><tr><th>Portée</th><th>Période</th><th class="num">Montant</th><th></th></tr></thead>
+        <tbody id="budgetDefTable"></tbody>
+      </table>
+      <div id="budgetDefEmpty" class="empty">Aucun budget défini pour le moment.</div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Suivi mensuel</h2>
+        <select id="budgetMonthPicker" onchange="renderBudgetTracking()" style="max-width:160px;"></select>
+      </div>
+      <div id="budgetMonthlyList"></div>
+      <div id="budgetMonthlyEmpty" class="empty">Aucun budget mensuel défini.</div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Suivi annuel</h2>
+        <select id="budgetYearPicker" onchange="renderBudgetTracking()" style="max-width:120px;"></select>
+      </div>
+      <div id="budgetAnnualList"></div>
+      <div id="budgetAnnualEmpty" class="empty">Aucun budget annuel défini.</div>
+    </div>
+  </section>
+
   <!-- ============ DASHBOARD ============ -->
   <section class="view" id="view-dashboard">
     <div class="card">
@@ -530,7 +588,7 @@ function defaultCategories(){
   ];
 }
 function defaultState(){
-  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [], openingBalance: { date: "", amount: 0 } };
+  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [], openingBalance: { date: "", amount: 0 }, budgets: [] };
 }
 
 function loadLocalState(){
@@ -544,7 +602,7 @@ function loadLocalState(){
 }
 function saveLocal(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance
+    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance, budgets: state.budgets
   })); }catch(e){}
 }
 
@@ -620,6 +678,7 @@ async function refreshFromDrive(isInitial){
       state.transactions = remote.transactions || state.transactions;
       state.imports = remote.imports || state.imports;
       state.openingBalance = remote.openingBalance || state.openingBalance;
+      state.budgets = remote.budgets || state.budgets;
       famTitleInput.value = state.famTitle;
       saveLocal();
       renderAll();
@@ -653,7 +712,7 @@ function schedulePersist(){
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" }, // évite le preflight CORS
         body: JSON.stringify({
-          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance
+          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance, budgets: state.budgets
         })
       });
       if(!res.ok) throw new Error("HTTP " + res.status);
@@ -675,6 +734,7 @@ document.querySelectorAll("nav.tabs button").forEach(btn=>{
     document.getElementById("view-"+btn.dataset.view).classList.add("active");
     if(btn.dataset.view === "dashboard") renderDashboard();
     if(btn.dataset.view === "transactions") renderTransactions();
+    if(btn.dataset.view === "budget") renderBudgets();
   });
 });
 
@@ -739,7 +799,148 @@ function renderCategories(){
     state.categories.map(c=>`<option value="${categoryLabel(c)}">`).join("");
   const catOptions = state.categories.map(c=>`<option value="${c.id}">${categoryLabel(c)}</option>`).join("");
   document.getElementById("filterCategory").innerHTML = '<option value="">Toutes catégories</option><option value="__none__">Non catégorisé</option>' + catOptions;
+  renderBudgetScopeOptions();
 }
+
+/* ---------------- Budget ---------------- */
+function uniqueScopeGroups(){
+  const set = new Set();
+  state.categories.forEach(c=> set.add(c.group || c.name));
+  return Array.from(set).sort((a,b)=>a.localeCompare(b,"fr"));
+}
+
+function renderBudgetScopeOptions(){
+  const type = document.getElementById("budgetScopeType").value;
+  const list = document.getElementById("budgetScopeDatalist");
+  if(!list) return;
+  if(type === "group"){
+    list.innerHTML = uniqueScopeGroups().map(g=>`<option value="${g}">`).join("");
+  }else{
+    list.innerHTML = state.categories.map(c=>`<option value="${categoryLabel(c)}">`).join("");
+  }
+}
+
+function budgetScopeLabel(scope){
+  if(scope.type === "group") return scope.value;
+  const cat = state.categories.find(c=>c.id===scope.value);
+  return cat ? categoryLabel(cat) : "(catégorie supprimée)";
+}
+
+function addBudget(){
+  const type = document.getElementById("budgetScopeType").value;
+  const searchVal = document.getElementById("budgetScopeSearch").value.trim();
+  const period = document.getElementById("budgetPeriod").value;
+  const amount = parseFrenchNumber(document.getElementById("budgetAmount").value);
+  if(!searchVal){ appAlert("Choisissez une catégorie principale ou une sous-catégorie."); return; }
+  if(isNaN(amount) || amount <= 0){ appAlert("Indiquez un montant cible valide."); return; }
+
+  let scope;
+  if(type === "group"){
+    if(!uniqueScopeGroups().includes(searchVal)){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return; }
+    scope = { type:"group", value: searchVal };
+  }else{
+    const cat = findCategoryByLabel(searchVal);
+    if(!cat){ appAlert("Sous-catégorie inconnue : « " + searchVal + " »."); return; }
+    scope = { type:"category", value: cat.id };
+  }
+
+  // Remplace un budget existant de même portée + même période plutôt que d'en créer un doublon.
+  state.budgets = state.budgets.filter(b=> !(b.scope.type===scope.type && b.scope.value===scope.value && b.period===period));
+  state.budgets.push({ id: uid(), scope, period, amount });
+  document.getElementById("budgetScopeSearch").value = "";
+  document.getElementById("budgetAmount").value = "";
+  persistConfig();
+  renderBudgets();
+}
+
+function removeBudget(id){
+  state.budgets = state.budgets.filter(b=>b.id!==id);
+  persistConfig();
+  renderBudgets();
+}
+
+function renderBudgetDefinitions(){
+  const tbody = document.getElementById("budgetDefTable");
+  const sorted = [...state.budgets].sort((a,b)=> budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"));
+  tbody.innerHTML = sorted.map(b=>`
+    <tr>
+      <td>${budgetScopeLabel(b.scope)}</td>
+      <td>${b.period === "monthly" ? "Mensuel" : "Annuel"}</td>
+      <td class="num">${euro(b.amount)}</td>
+      <td><button class="icon-btn" onclick="removeBudget('${b.id}')">✕</button></td>
+    </tr>`).join("");
+  document.getElementById("budgetDefEmpty").style.display = sorted.length ? "none" : "block";
+}
+
+function txMatchesScope(t, scope){
+  const cat = state.categories.find(c=>c.id===t.categoryId);
+  if(!cat) return false;
+  if(scope.type === "group") return (cat.group || cat.name) === scope.value;
+  return cat.id === scope.value;
+}
+
+function renderBudgetProgressRow(label, budgetAmount, spent){
+  const pct = budgetAmount > 0 ? Math.min((spent/budgetAmount)*100, 100) : (spent>0?100:0);
+  const over = spent > budgetAmount;
+  return `<div class="cat-row">
+    <div class="top">
+      <span class="name">${label}</span>
+      <span class="figures">${euro(spent)} / ${euro(budgetAmount)}${over ? " · dépassement" : ""}</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill ${over?"exp":""}" style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+function renderBudgetTracking(){
+  const monthlyBudgets = state.budgets.filter(b=>b.period==="monthly");
+  const annualBudgets = state.budgets.filter(b=>b.period==="annual");
+
+  const monthPicker = document.getElementById("budgetMonthPicker");
+  const months = Array.from(new Set(state.transactions.map(t=>monthKey(t.date)).filter(Boolean))).sort().reverse();
+  const currentMonth = new Date().toISOString().slice(0,7);
+  const monthOptions = Array.from(new Set([currentMonth, ...months])).sort().reverse();
+  const prevMonthVal = monthPicker.value;
+  monthPicker.innerHTML = monthOptions.map(m=>`<option value="${m}">${m}</option>`).join("");
+  monthPicker.value = monthOptions.includes(prevMonthVal) ? prevMonthVal : currentMonth;
+
+  const yearPicker = document.getElementById("budgetYearPicker");
+  const years = Array.from(new Set(state.transactions.map(t=>(t.date||"").slice(0,4)).filter(Boolean)));
+  const currentYear = String(new Date().getFullYear());
+  const yearOptions = Array.from(new Set([currentYear, ...years])).sort().reverse();
+  const prevYearVal = yearPicker.value;
+  yearPicker.innerHTML = yearOptions.map(y=>`<option value="${y}">${y}</option>`).join("");
+  yearPicker.value = yearOptions.includes(prevYearVal) ? prevYearVal : currentYear;
+
+  const selMonth = monthPicker.value;
+  const monthlyList = document.getElementById("budgetMonthlyList");
+  monthlyList.innerHTML = monthlyBudgets
+    .sort((a,b)=>budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"))
+    .map(b=>{
+      const spent = state.transactions
+        .filter(t=> monthKey(t.date)===selMonth && t.amount<0 && txMatchesScope(t,b.scope))
+        .reduce((s,t)=>s+Math.abs(t.amount),0);
+      return renderBudgetProgressRow(budgetScopeLabel(b.scope), b.amount, spent);
+    }).join("");
+  document.getElementById("budgetMonthlyEmpty").style.display = monthlyBudgets.length ? "none" : "block";
+
+  const selYear = yearPicker.value;
+  const annualList = document.getElementById("budgetAnnualList");
+  annualList.innerHTML = annualBudgets
+    .sort((a,b)=>budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"))
+    .map(b=>{
+      const spent = state.transactions
+        .filter(t=> (t.date||"").slice(0,4)===selYear && t.amount<0 && txMatchesScope(t,b.scope))
+        .reduce((s,t)=>s+Math.abs(t.amount),0);
+      return renderBudgetProgressRow(budgetScopeLabel(b.scope), b.amount, spent);
+    }).join("");
+  document.getElementById("budgetAnnualEmpty").style.display = annualBudgets.length ? "none" : "block";
+}
+
+function renderBudgets(){
+  renderBudgetDefinitions();
+  renderBudgetTracking();
+}
+
 
 /* ---------------- Règles ---------------- */
 function addRule(){
@@ -1825,6 +2026,7 @@ function importBackup(file){
       state.rules = parsed.rules || state.rules;
       state.imports = parsed.imports || state.imports;
       state.openingBalance = parsed.openingBalance || state.openingBalance;
+      state.budgets = parsed.budgets || state.budgets;
       const importedTxs = parsed.transactions || [];
       importedTxs.forEach(t=>{
         const idx = state.transactions.findIndex(x=>x.id===t.id);
@@ -1897,6 +2099,7 @@ function renderAll(){
   renderTransactions();
   renderDashboard();
   renderImportBatches();
+  renderBudgets();
 }
 initStorage();
 </script>
