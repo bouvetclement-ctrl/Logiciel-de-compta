@@ -312,12 +312,13 @@
       <h2>Catégories</h2>
       <p class="sub">La liste des postes utilisés pour classer les opérations.</p>
       <div class="grid-form">
-        <div class="field"><label>Nom</label><input type="text" id="newCatName" placeholder="Ex : Alimentation"></div>
+        <div class="field"><label>Catégorie principale (optionnel)</label><input type="text" id="newCatGroup" placeholder="Ex : Logement"></div>
+        <div class="field"><label>Sous-catégorie</label><input type="text" id="newCatName" placeholder="Ex : Electricité"></div>
         <div class="field"><label>Type</label><select id="newCatType"><option value="depense">Dépense</option><option value="revenu">Revenu</option></select></div>
         <div class="field" style="align-self:end;"><button class="btn" onclick="addCategory()">Ajouter</button></div>
       </div>
       <table>
-        <thead><tr><th>Catégorie</th><th>Type</th><th></th></tr></thead>
+        <thead><tr><th>Catégorie principale</th><th>Sous-catégorie</th><th>Type</th><th></th></tr></thead>
         <tbody id="catTable"></tbody>
       </table>
     </div>
@@ -538,12 +539,24 @@ famTitleInput.addEventListener("change", ()=>{ state.famTitle = famTitleInput.va
 
 /* ---------------- Catégories ---------------- */
 function addCategory(){
+  const groupInput = document.getElementById("newCatGroup");
   const nameInput = document.getElementById("newCatName");
   const typeInput = document.getElementById("newCatType");
   const name = nameInput.value.trim();
   if(!name) return;
-  state.categories.push({ id: uid(), name, type: typeInput.value });
+  const group = groupInput.value.trim();
+  state.categories.push({ id: uid(), name, group, type: typeInput.value });
   nameInput.value = "";
+  groupInput.value = "";
+  persistConfig();
+  renderAll();
+}
+function updateCategoryField(id, field, value){
+  const cat = state.categories.find(c=>c.id===id);
+  if(!cat) return;
+  const v = value.trim();
+  if(field === "name" && !v){ renderCategories(); return; } // la sous-catégorie ne peut pas être vide
+  cat[field] = v;
   persistConfig();
   renderAll();
 }
@@ -569,7 +582,12 @@ function renderCategories(){
   const sorted = [...state.categories].sort((a,b)=> (a.group||"").localeCompare(b.group||"") || a.name.localeCompare(b.name));
   sorted.forEach(cat=>{
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${cat.group ? `<span class="hint" style="margin:0;">${cat.group} ·</span> ` : ""}${cat.name}</td><td>${cat.type==='revenu'?'Revenu':'Dépense'}</td>
+    tr.innerHTML = `
+      <td><input type="text" value="${cat.group||""}" placeholder="—" style="width:150px;"
+            onchange="updateCategoryField('${cat.id}','group',this.value)"></td>
+      <td><input type="text" value="${cat.name}" style="width:170px;"
+            onchange="updateCategoryField('${cat.id}','name',this.value)"></td>
+      <td>${cat.type==='revenu'?'Revenu':'Dépense'}</td>
       <td><button class="icon-btn" onclick="removeCategory('${cat.id}')">✕</button></td>`;
     tbody.appendChild(tr);
   });
