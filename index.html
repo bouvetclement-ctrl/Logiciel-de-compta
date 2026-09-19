@@ -108,7 +108,7 @@
 
   .catsel{ font-size:12.5px; padding:5px 6px; }
 
-  /* ---- Sélecteur de catégorie (menu à survol) ---- */
+  /* ---- Sélecteur de catégorie (deux panneaux flottants positionnés en JS) ---- */
   .cat-cell-btn{
     font: inherit; font-size:12.5px; background:var(--surface-2); border:1px solid var(--border);
     color:var(--ink); border-radius:3px; padding:5px 8px; cursor:pointer; text-align:left; width:100%;
@@ -128,20 +128,7 @@
   }
   .cat-menu button:hover{ background:var(--surface-2); }
   .cat-menu .cat-leaf-clear{ color:var(--muted); border-top:1px solid var(--border); margin-top:4px; padding-top:8px; }
-  .cat-group-item{ position:relative; }
-  .cat-group-item > .cat-group-label{
-    display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left; background:none;
-    border:none; font:inherit; font-size:13px; color:var(--ink); padding:7px 10px; border-radius:3px; cursor:pointer;
-  }
-  .cat-group-item > .cat-group-label:hover{ background:var(--surface-2); }
-  .cat-submenu{
-    display:none; position:absolute; left:100%; top:-4px; background:var(--surface); border:1px solid var(--border);
-    border-radius:5px; box-shadow:0 8px 24px rgba(0,0,0,.25); min-width:170px; max-height:60vh; overflow-y:auto; padding:4px;
-  }
-  .cat-group-item:hover > .cat-submenu, .cat-group-item.open > .cat-submenu{ display:block; }
-  @media (max-width:700px){
-    .cat-submenu{ left:0; top:100%; } /* évite de sortir de l'écran sur mobile */
-  }
+  .cat-menu .cat-group-label{ display:flex; justify-content:space-between; align-items:center; }
 
   .drop{ border:2px dashed var(--border); border-radius:6px; padding:26px; text-align:center; color:var(--muted); }
   .drop.drag{ border-color:var(--green); color:var(--green); }
@@ -216,6 +203,7 @@
       <button class="btn secondary small" onclick="exportBackup()">⭳ Exporter la sauvegarde</button>
       <button class="btn secondary small" onclick="document.getElementById('importBackupFile').click()">⭱ Importer une sauvegarde</button>
       <input type="file" id="importBackupFile" accept="application/json" style="display:none" onchange="importBackup(this.files[0])">
+      <button class="btn secondary small" style="color:var(--terracotta); border-color:var(--terracotta);" onclick="resetAllData()">🗑️ Tout réinitialiser</button>
     </div>
   </div>
 
@@ -411,6 +399,7 @@
 
   <datalist id="categoryDatalist"></datalist>
   <div id="catMenuPopover" class="cat-menu"></div>
+  <div id="catSubmenuPopover" class="cat-menu"></div>
 
   <footer>Vos opérations restent dans ce navigateur. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
 </div>
@@ -991,8 +980,9 @@ function setCategoryOnTx(id, categoryId){
   renderTransactions();
 }
 
-/* ---- Menu de sélection de catégorie (survol pour les sous-catégories) ---- */
+/* ---- Menu de sélection de catégorie (deux panneaux flottants, positionnés dynamiquement) ---- */
 let activePickerTxId = null;
+let submenuHideTimer = null;
 
 function buildCategoryMenuHTML(){
   const groups = {};
@@ -1006,16 +996,29 @@ function buildCategoryMenuHTML(){
     html += `<button type="button" class="cat-leaf" data-cat="${c.id}">${c.name}</button>`;
   });
   Object.keys(groups).sort((a,b)=>a.localeCompare(b,"fr")).forEach(g=>{
-    const subs = groups[g].sort((a,b)=>a.name.localeCompare(b.name,"fr"));
-    html += `<div class="cat-group-item">
-      <button type="button" class="cat-group-label">${g} <span>▸</span></button>
-      <div class="cat-submenu">
-        ${subs.map(c=>`<button type="button" class="cat-leaf" data-cat="${c.id}">${c.name}</button>`).join("")}
-      </div>
-    </div>`;
+    html += `<button type="button" class="cat-group-label" data-group="${g.replace(/"/g,'&quot;')}">${g} <span>▸</span></button>`;
   });
   html += `<button type="button" class="cat-leaf cat-leaf-clear" data-cat="">— Aucune —</button>`;
   return html;
+}
+function buildSubmenuHTML(groupName){
+  return state.categories.filter(c=>c.group===groupName)
+    .sort((a,b)=>a.name.localeCompare(b.name,"fr"))
+    .map(c=>`<button type="button" class="cat-leaf" data-cat="${c.id}">${c.name}</button>`)
+    .join("");
+}
+
+/* Positionne un panneau (position:fixed) près d'un élément déclencheur,
+   à droite si la place le permet, sinon à gauche ; jamais hors écran. */
+function positionFloatingPanel(panel, triggerRect){
+  const w = panel.offsetWidth, h = panel.offsetHeight;
+  let left = triggerRect.right + 4;
+  if(left + w > window.innerWidth - 8) left = triggerRect.left - w - 4;
+  if(left < 8) left = 8;
+  let top = triggerRect.top;
+  if(top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
+  panel.style.left = left + "px";
+  panel.style.top = top + "px";
 }
 
 function openCategoryPicker(evt, txId){
@@ -1027,28 +1030,50 @@ function openCategoryPicker(evt, txId){
 
   activePickerTxId = txId;
   popover.innerHTML = buildCategoryMenuHTML();
-
-  const rect = evt.currentTarget.getBoundingClientRect();
-  popover.style.left = Math.min(rect.left, window.innerWidth - 240) + "px";
-  popover.style.top = Math.min(rect.bottom + 4, window.innerHeight - 60) + "px";
   popover.classList.add("open");
+  positionFloatingPanel(popover, evt.currentTarget.getBoundingClientRect());
+}
+
+function closeSubmenu(){
+  const sub = document.getElementById("catSubmenuPopover");
+  sub.classList.remove("open");
+  sub.dataset.group = "";
 }
 
 function closeCategoryPicker(){
-  const popover = document.getElementById("catMenuPopover");
-  popover.classList.remove("open");
+  document.getElementById("catMenuPopover").classList.remove("open");
+  closeSubmenu();
   activePickerTxId = null;
 }
 
-document.getElementById("catMenuPopover").addEventListener("click", (e)=>{
-  const groupLabel = e.target.closest(".cat-group-label");
-  if(groupLabel){
-    // support tactile : un clic bascule l'ouverture du sous-menu (le survol fait déjà le travail sur ordinateur)
+function showSubmenuFor(groupBtn){
+  clearTimeout(submenuHideTimer);
+  const sub = document.getElementById("catSubmenuPopover");
+  const groupName = groupBtn.dataset.group;
+  if(sub.dataset.group === groupName && sub.classList.contains("open")) return;
+  sub.innerHTML = buildSubmenuHTML(groupName);
+  sub.dataset.group = groupName;
+  sub.classList.add("open");
+  positionFloatingPanel(sub, groupBtn.getBoundingClientRect());
+}
+function scheduleHideSubmenu(){
+  clearTimeout(submenuHideTimer);
+  submenuHideTimer = setTimeout(closeSubmenu, 250);
+}
+
+const mainPopoverEl = document.getElementById("catMenuPopover");
+const subPopoverEl = document.getElementById("catSubmenuPopover");
+
+mainPopoverEl.addEventListener("mouseover", (e)=>{
+  const groupBtn = e.target.closest(".cat-group-label");
+  if(groupBtn) showSubmenuFor(groupBtn);
+});
+mainPopoverEl.addEventListener("mouseleave", scheduleHideSubmenu);
+mainPopoverEl.addEventListener("click", (e)=>{
+  const groupBtn = e.target.closest(".cat-group-label");
+  if(groupBtn){
     e.stopPropagation();
-    const item = groupLabel.closest(".cat-group-item");
-    const wasOpen = item.classList.contains("open");
-    document.querySelectorAll("#catMenuPopover .cat-group-item.open").forEach(el=>el.classList.remove("open"));
-    if(!wasOpen) item.classList.add("open");
+    showSubmenuFor(groupBtn); // support tactile : le clic ouvre aussi (le survol suffit sur ordinateur)
     return;
   }
   const leaf = e.target.closest(".cat-leaf");
@@ -1057,8 +1082,19 @@ document.getElementById("catMenuPopover").addEventListener("click", (e)=>{
     closeCategoryPicker();
   }
 });
+
+subPopoverEl.addEventListener("mouseenter", ()=>clearTimeout(submenuHideTimer));
+subPopoverEl.addEventListener("mouseleave", scheduleHideSubmenu);
+subPopoverEl.addEventListener("click", (e)=>{
+  const leaf = e.target.closest(".cat-leaf");
+  if(leaf && activePickerTxId){
+    setCategoryOnTx(activePickerTxId, leaf.dataset.cat || "");
+    closeCategoryPicker();
+  }
+});
+
 document.addEventListener("click", (e)=>{
-  if(!e.target.closest("#catMenuPopover") && !e.target.closest(".cat-cell-btn")) closeCategoryPicker();
+  if(!e.target.closest("#catMenuPopover") && !e.target.closest("#catSubmenuPopover") && !e.target.closest(".cat-cell-btn")) closeCategoryPicker();
 });
 window.addEventListener("scroll", closeCategoryPicker, true);
 window.addEventListener("resize", closeCategoryPicker);
@@ -1502,6 +1538,33 @@ async function saveFile(filename, text, mime){
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function resetAllData(){
+  const warning = state.transactions.length
+    ? `Ceci supprime DÉFINITIVEMENT les ${state.transactions.length} opération(s), les catégories, les règles et l'historique d'import de ce navigateur`
+    : "Ceci réinitialise les catégories et règles";
+  const cloudNote = (storageMode === "google" && scriptUrl)
+    ? " — et écrasera aussi la sauvegarde sur votre Google Drive connecté"
+    : "";
+  const answer = prompt(warning + cloudNote + ".\n\nTapez RESET (en majuscules) pour confirmer :");
+  if(answer !== "RESET"){
+    if(answer !== null) alert("Réinitialisation annulée : le texte tapé ne correspond pas.");
+    return;
+  }
+  closeCategoryPicker();
+  dismissAiRules();
+  selectedIds.clear();
+  parsedRows = null; parsedHeaders = null; currentImportFileName = "";
+  document.getElementById("mappingBox").style.display = "none";
+  document.getElementById("duplicatesBox").style.display = "none";
+  document.getElementById("csvFile").value = "";
+
+  state = defaultState();
+  saveLocal();
+  if(storageMode === "google" && scriptUrl) schedulePersist();
+  renderAll();
+  alert("Toutes les données ont été réinitialisées. Vous pouvez réimporter votre relevé depuis le début.");
 }
 
 function exportBackup(){
