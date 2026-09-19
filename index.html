@@ -166,7 +166,7 @@
     <div class="kpis">
       <div class="kpi"><div class="l">Revenus</div><div class="v pos" id="kpiIn">0,00 €</div></div>
       <div class="kpi"><div class="l">Dépenses</div><div class="v neg" id="kpiOut">0,00 €</div></div>
-      <div class="kpi"><div class="l">Solde</div><div class="v" id="kpiNet">0,00 €</div></div>
+      <div class="kpi"><div class="l">Solde <button class="icon-btn" style="font-size:12px; padding:0 2px;" onclick="editOpeningBalance()" title="Régler le solde initial">✎</button></div><div class="v" id="kpiNet">0,00 €</div><div class="hint" id="obHint" style="margin-top:2px;"></div></div>
     </div>
   </header>
 
@@ -434,7 +434,7 @@ function defaultCategories(){
   ];
 }
 function defaultState(){
-  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [] };
+  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [], openingBalance: { date: "", amount: 0 } };
 }
 
 function loadLocalState(){
@@ -448,7 +448,7 @@ function loadLocalState(){
 }
 function saveLocal(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports
+    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance
   })); }catch(e){}
 }
 
@@ -523,6 +523,7 @@ async function refreshFromDrive(isInitial){
       state.rules = remote.rules || state.rules;
       state.transactions = remote.transactions || state.transactions;
       state.imports = remote.imports || state.imports;
+      state.openingBalance = remote.openingBalance || state.openingBalance;
       famTitleInput.value = state.famTitle;
       saveLocal();
       renderAll();
@@ -556,7 +557,7 @@ function schedulePersist(){
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" }, // évite le preflight CORS
         body: JSON.stringify({
-          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports
+          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance
         })
       });
       if(!res.ok) throw new Error("HTTP " + res.status);
@@ -864,8 +865,10 @@ function checkDuplicates(){
   const dateCol = document.getElementById("mapDate").value;
   const labelCol = document.getElementById("mapLabel").value;
 
-  // Bassin de référence : les opérations déjà enregistrées, complété au fil de l'eau
-  // par les lignes du fichier lui-même (pour détecter aussi les doublons internes au fichier).
+  // Bassin de référence : UNIQUEMENT les opérations déjà enregistrées avant cet import.
+  // (Comparer aussi les lignes du fichier entre elles produisait de faux doublons sur de
+  //  vraies opérations répétées — deux abonnements identiques le même jour, deux péages
+  //  à la suite, etc. — surtout sur un gros import historique.)
   const pool = state.transactions.map(t=>({ date: t.date, label: t.label, amount: t.amount }));
 
   duplicateMatches = parsedRows.map((r, idx)=>{
@@ -878,7 +881,6 @@ function checkDuplicates(){
       Math.abs(p.amount - amount) < 0.005 &&
       p.date && daysBetween(p.date, date) <= 2
     );
-    pool.push({ date, label, amount }); // sert aussi de référence pour les lignes suivantes du fichier
     return match ? { idx, date, label, amount, matchDate: match.date } : null;
   });
 
@@ -1320,14 +1322,42 @@ function bulkDeleteSelection(){
 }
 
 function renderKpis(){
-  const totalIn = state.transactions.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
-  const totalOut = state.transactions.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0);
+  const ob = state.openingBalance || { date: "", amount: 0 };
+  const relevant = ob.date ? state.transactions.filter(t=>t.date >= ob.date) : state.transactions;
+  const totalIn = relevant.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const totalOut = relevant.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0);
   document.getElementById("kpiIn").textContent = euro(totalIn);
   document.getElementById("kpiOut").textContent = euro(Math.abs(totalOut));
-  const net = totalIn + totalOut;
+  const net = (ob.amount || 0) + totalIn + totalOut;
   const netEl = document.getElementById("kpiNet");
   netEl.textContent = (net>=0?"+":"") + euro(net);
   netEl.className = "v " + (net>=0 ? "pos" : "neg");
+  const obHint = document.getElementById("obHint");
+  if(obHint){
+    obHint.textContent = ob.date
+      ? `dont ${euro(ob.amount||0)} au ${ob.date}`
+      : "solde initial non réglé — cliquez ✎";
+  }
+}
+
+function editOpeningBalance(){
+  const ob = state.openingBalance || { date: "", amount: 0 };
+  const dateInput = prompt(
+    "Date à laquelle votre compte affichait le solde ci-dessous (le jour juste avant votre toute première opération importée), au format JJ/MM/AAAA :",
+    ob.date ? ob.date.split("-").reverse().join("/") : ""
+  );
+  if(dateInput === null) return;
+  const date = parseFlexDate(dateInput.trim());
+  if(dateInput.trim() && !date){ alert("Date non reconnue."); return; }
+
+  const amtInput = prompt("Solde de votre compte à cette date (€) :", ob.amount || 0);
+  if(amtInput === null) return;
+  const amount = parseFrenchNumber(amtInput);
+  if(isNaN(amount)){ alert("Montant invalide."); return; }
+
+  state.openingBalance = { date: date || "", amount };
+  persistConfig();
+  renderKpis();
 }
 
 /* ---------------- Tri IA ---------------- */
@@ -1683,6 +1713,7 @@ function importBackup(file){
       state.categories = parsed.categories || state.categories;
       state.rules = parsed.rules || state.rules;
       state.imports = parsed.imports || state.imports;
+      state.openingBalance = parsed.openingBalance || state.openingBalance;
       const importedTxs = parsed.transactions || [];
       importedTxs.forEach(t=>{
         const idx = state.transactions.findIndex(x=>x.id===t.id);
