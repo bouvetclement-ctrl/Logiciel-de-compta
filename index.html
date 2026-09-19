@@ -1242,9 +1242,9 @@ mainPopoverEl.addEventListener("mouseover", (e)=>{
 });
 mainPopoverEl.addEventListener("mouseleave", scheduleHideSubmenu);
 mainPopoverEl.addEventListener("click", (e)=>{
+  e.stopPropagation(); // empêche tout clic dans le menu (y compris sur la barre de défilement) de le fermer
   const groupBtn = e.target.closest(".cat-group-label");
   if(groupBtn){
-    e.stopPropagation();
     showSubmenuFor(groupBtn); // support tactile : le clic ouvre aussi (le survol suffit sur ordinateur)
     return;
   }
@@ -1258,6 +1258,7 @@ mainPopoverEl.addEventListener("click", (e)=>{
 subPopoverEl.addEventListener("mouseenter", ()=>clearTimeout(submenuHideTimer));
 subPopoverEl.addEventListener("mouseleave", scheduleHideSubmenu);
 subPopoverEl.addEventListener("click", (e)=>{
+  e.stopPropagation();
   const leaf = e.target.closest(".cat-leaf");
   if(leaf && activePickerTxId){
     setCategoryOnTx(activePickerTxId, leaf.dataset.cat || "");
