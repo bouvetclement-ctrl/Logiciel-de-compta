@@ -227,6 +227,7 @@
         <h2 style="margin:0;">Journal des opérations</h2>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn small" id="aiSortBtn" onclick="runAiSort()">✨ Trier avec l'IA les non catégorisées</button>
+          <button class="btn secondary small" onclick="reapplyRules()">📏 Appliquer les règles</button>
           <button class="btn secondary small" onclick="exportCsv()">⭳ Export CSV</button>
         </div>
       </div>
@@ -235,7 +236,20 @@
         <div class="field"><label>Recherche</label><input type="text" id="filterSearch" placeholder="Libellé..." oninput="renderTransactions()"></div>
         <div class="field"><label>Catégorie</label><select id="filterCategory" onchange="renderTransactions()"></select></div>
         <div class="field"><label>Mois</label><select id="filterMonth" onchange="renderTransactions()"></select></div>
+        <div class="field"><label>Trier par</label>
+          <select id="sortBy" onchange="renderTransactions()">
+            <option value="date_desc">Date (récent → ancien)</option>
+            <option value="date_asc">Date (ancien → récent)</option>
+            <option value="label_asc">Libellé (A → Z)</option>
+            <option value="label_desc">Libellé (Z → A)</option>
+            <option value="amount_desc">Montant (haut → bas)</option>
+            <option value="amount_asc">Montant (bas → haut)</option>
+          </select>
+        </div>
       </div>
+      <label class="chk on" style="display:inline-flex; margin-bottom:12px;">
+        <input type="checkbox" id="groupByMonth" onchange="renderTransactions()" style="width:auto;"> Regrouper par mois
+      </label>
       <p class="hint" id="aiHint" style="display:none;"></p>
       <div id="aiRulesReview" class="card" style="display:none; margin:0 0 16px; padding:14px 16px; background:var(--surface-2);">
         <h2 style="font-size:15px; margin-bottom:8px;">Règles proposées par l'IA</h2>
@@ -246,13 +260,36 @@
           <button class="btn secondary small" onclick="dismissAiRules()">Ignorer</button>
         </div>
       </div>
+
+      <div id="bulkBar" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:10px 12px; margin-bottom:12px;">
+        <strong id="bulkCount" style="font-size:13px;"></strong>
+        <select id="bulkCategorySelect" style="max-width:220px;"></select>
+        <button class="btn small" onclick="bulkAssignCategory()">Assigner la catégorie</button>
+        <button class="btn secondary small" onclick="bulkDeleteSelection()">Supprimer la sélection</button>
+        <button class="btn secondary small" onclick="clearSelection()">Annuler la sélection</button>
+      </div>
+
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Catégorie</th><th>Origine</th><th></th></tr></thead>
+          <thead><tr>
+            <th><input type="checkbox" id="selectAllChk" onchange="toggleSelectAll(this.checked)" style="width:auto;"></th>
+            <th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Catégorie</th><th>Origine</th><th></th>
+          </tr></thead>
           <tbody id="txTable"></tbody>
         </table>
       </div>
       <div id="txEmpty" class="empty">Aucune opération. Importez un relevé pour commencer.</div>
+    </div>
+
+    <div class="card" id="importBatchesBox" style="display:none;">
+      <h2>Imports récents</h2>
+      <p class="sub">En cas d'import raté ou en double, supprimez-le d'un coup ici plutôt que ligne par ligne.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Fichier</th><th>Importé le</th><th class="num">Opérations</th><th></th></tr></thead>
+          <tbody id="importBatchesTable"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -334,7 +371,7 @@ function defaultCategories(){
   ];
 }
 function defaultState(){
-  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [] };
+  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [] };
 }
 
 function loadLocalState(){
@@ -348,7 +385,7 @@ function loadLocalState(){
 }
 function saveLocal(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports
   })); }catch(e){}
 }
 
@@ -422,6 +459,7 @@ async function refreshFromDrive(isInitial){
       state.categories = (remote.categories && remote.categories.length) ? remote.categories : state.categories;
       state.rules = remote.rules || state.rules;
       state.transactions = remote.transactions || state.transactions;
+      state.imports = remote.imports || state.imports;
       famTitleInput.value = state.famTitle;
       saveLocal();
       renderAll();
@@ -455,7 +493,7 @@ function schedulePersist(){
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" }, // évite le preflight CORS
         body: JSON.stringify({
-          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports
         })
       });
       if(!res.ok) throw new Error("HTTP " + res.status);
@@ -574,18 +612,40 @@ const dropZone = document.getElementById("dropZone");
   });
 });
 
+function decodeCsvBuffer(buffer){
+  try{
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  }catch(e){
+    // Fichier non-UTF-8 (courant pour les exports bancaires français) : on retombe
+    // sur Windows-1252 / ISO-8859-1, qui gère correctement les accents (é, è, ç...).
+    return new TextDecoder("windows-1252").decode(buffer);
+  }
+}
+
+let currentImportFileName = "";
 function handleFile(file){
   if(!file) return;
-  Papa.parse(file, {
+  currentImportFileName = file.name || "";
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const text = decodeCsvBuffer(e.target.result);
+    parseCsvText(text);
+  };
+  reader.onerror = ()=> alert("Impossible de lire ce fichier CSV.");
+  reader.readAsArrayBuffer(file);
+}
+
+function parseCsvText(text){
+  Papa.parse(text, {
     header: false,
     skipEmptyLines: true,
     delimitersToGuess: [',',';','\t','|'],
     complete: (res)=>{
       const raw = res.data;
       if(!raw || raw.length === 0){ alert("Fichier vide ou illisible."); return; }
-      // Certains logiciels (iFinance, etc.) ajoutent plusieurs lignes d'info avant
-      // la vraie ligne d'en-têtes : on cherche la première ligne contenant "Date".
-      let headerIdx = raw.findIndex(row => row.some(cell => (cell||"").trim().toLowerCase() === "date"));
+      // Certains logiciels/banques ajoutent plusieurs lignes d'info avant la vraie
+      // ligne d'en-têtes : on cherche la première ligne dont une cellule commence par "date".
+      let headerIdx = raw.findIndex(row => row.some(cell => (cell||"").trim().toLowerCase().startsWith("date")));
       if(headerIdx === -1) headerIdx = 0;
       const headers = raw[headerIdx].map(h => (h||"").trim());
       parsedHeaders = headers;
@@ -734,6 +794,7 @@ function confirmImport(){
   const catCol = document.getElementById("mapCategory").value;
   const existingHashes = new Set(state.transactions.map(t=>t.hash));
   const categoriesBefore = state.categories.length;
+  const batchId = uid();
   const newTxs = [];
   let added = 0, skipped = 0, fromFile = 0;
   parsedRows.forEach(r=>{
@@ -755,12 +816,15 @@ function confirmImport(){
       if(categoryId) source = "rule";
     }
 
-    const tx = { id: uid(), date, label, amount, categoryId, source, hash };
+    const tx = { id: uid(), date, label, amount, categoryId, source, hash, batchId };
     state.transactions.push(tx);
     newTxs.push(tx);
     added++;
   });
-  if(state.categories.length !== categoriesBefore) persistConfig();
+  if(added > 0){
+    state.imports.unshift({ id: batchId, fileName: currentImportFileName, importedAt: new Date().toISOString(), count: added });
+  }
+  if(state.categories.length !== categoriesBefore || added > 0) persistConfig();
   persistTxBulk(newTxs);
   parsedRows = null;
   document.getElementById("mappingBox").style.display = "none";
@@ -801,22 +865,62 @@ function removeTx(id){
   renderAll();
 }
 
+let selectedIds = new Set();
+
+function sortRows(rows, sortBy){
+  const arr = [...rows];
+  switch(sortBy){
+    case "date_asc": arr.sort((a,b)=> (a.date||"").localeCompare(b.date||"")); break;
+    case "label_asc": arr.sort((a,b)=> a.label.localeCompare(b.label, "fr")); break;
+    case "label_desc": arr.sort((a,b)=> b.label.localeCompare(a.label, "fr")); break;
+    case "amount_desc": arr.sort((a,b)=> b.amount - a.amount); break;
+    case "amount_asc": arr.sort((a,b)=> a.amount - b.amount); break;
+    case "date_desc":
+    default: arr.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+  }
+  return arr;
+}
+
 function renderTransactions(){
   renderMonthFilterOptions();
   const search = (document.getElementById("filterSearch").value||"").toLowerCase();
   const catFilter = document.getElementById("filterCategory").value;
   const monthFilter = document.getElementById("filterMonth").value;
+  const sortBy = document.getElementById("sortBy").value;
+  const groupByMonth = document.getElementById("groupByMonth").checked;
 
-  let rows = [...state.transactions].sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+  let rows = state.transactions;
   if(search) rows = rows.filter(t=>t.label.toLowerCase().includes(search));
   if(catFilter === "__none__") rows = rows.filter(t=>!t.categoryId);
   else if(catFilter) rows = rows.filter(t=>t.categoryId === catFilter);
   if(monthFilter) rows = rows.filter(t=>monthKey(t.date) === monthFilter);
+  rows = sortRows(rows, groupByMonth ? "date_desc" : sortBy);
+
+  // Le regroupement force un tri par date pour que les mois restent contigus.
+  document.getElementById("sortBy").disabled = groupByMonth;
+
+  // On ne garde en sélection que ce qui est encore affiché.
+  const visibleIds = new Set(rows.map(t=>t.id));
+  selectedIds = new Set([...selectedIds].filter(id=>visibleIds.has(id)));
 
   const tbody = document.getElementById("txTable");
   tbody.innerHTML = "";
   const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
+
+  let lastMonth = null;
   rows.forEach(t=>{
+    if(groupByMonth){
+      const mk = monthKey(t.date) || "?";
+      if(mk !== lastMonth){
+        lastMonth = mk;
+        const monthTotal = rows.filter(r=>monthKey(r.date)===mk).reduce((s,r)=>s+r.amount,0);
+        const trh = document.createElement("tr");
+        trh.innerHTML = `<td colspan="7" style="background:var(--surface-2); font-family:var(--font-display); font-weight:600; font-size:13px;">
+          ${mk} <span class="hint" style="margin-left:8px;">solde du mois : ${(monthTotal>=0?"+":"")+euro(monthTotal)}</span>
+        </td>`;
+        tbody.appendChild(trh);
+      }
+    }
     const tr = document.createElement("tr");
     const badge = t.source === "rule" ? '<span class="tag rule">règle</span>'
       : t.source === "ai" ? '<span class="tag ai">IA</span>'
@@ -824,6 +928,7 @@ function renderTransactions(){
       : t.source === "manual" ? '<span class="tag manual">manuel</span>'
       : '<span class="tag none">à trier</span>';
     tr.innerHTML = `
+      <td><input type="checkbox" class="rowChk" data-id="${t.id}" style="width:auto;" ${selectedIds.has(t.id)?"checked":""}></td>
       <td>${t.date||"—"}</td>
       <td>${t.label}</td>
       <td class="num amt ${t.amount>=0?'pos':'neg'}">${euro(t.amount)}</td>
@@ -833,13 +938,62 @@ function renderTransactions(){
       <td>${badge}</td>
       <td><button class="icon-btn" onclick="removeTx('${t.id}')">✕</button></td>`;
     tr.querySelector("select").value = t.categoryId || "";
+    tr.querySelector(".rowChk").addEventListener("change", (e)=>{
+      if(e.target.checked) selectedIds.add(t.id); else selectedIds.delete(t.id);
+      renderBulkBar();
+    });
     tbody.appendChild(tr);
   });
   document.getElementById("txEmpty").style.display = rows.length ? "none" : "block";
+  document.getElementById("selectAllChk").checked = rows.length > 0 && selectedIds.size === rows.length;
 
   const uncatCount = state.transactions.filter(t=>!t.categoryId).length;
   document.getElementById("aiSortBtn").disabled = uncatCount === 0;
+  renderBulkBar();
   renderKpis();
+}
+
+function toggleSelectAll(checked){
+  document.querySelectorAll("#txTable .rowChk").forEach(chk=>{
+    chk.checked = checked;
+    const id = chk.dataset.id;
+    if(checked) selectedIds.add(id); else selectedIds.delete(id);
+  });
+  renderBulkBar();
+}
+
+function clearSelection(){
+  selectedIds.clear();
+  renderTransactions();
+}
+
+function renderBulkBar(){
+  const bar = document.getElementById("bulkBar");
+  if(selectedIds.size === 0){ bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  document.getElementById("bulkCount").textContent = selectedIds.size + " opération(s) sélectionnée(s)";
+  const catOptions = state.categories.map(c=>`<option value="${c.id}">${c.group?c.group+" · ":""}${c.name}</option>`).join("");
+  document.getElementById("bulkCategorySelect").innerHTML = '<option value="">Choisir une catégorie…</option>' + catOptions;
+}
+
+function bulkAssignCategory(){
+  const categoryId = document.getElementById("bulkCategorySelect").value;
+  if(!categoryId){ alert("Choisissez d'abord une catégorie."); return; }
+  const changed = [];
+  state.transactions.forEach(t=>{
+    if(selectedIds.has(t.id)){ t.categoryId = categoryId; t.source = "manual"; changed.push(t); }
+  });
+  persistTxBulk(changed);
+  renderAll();
+}
+
+function bulkDeleteSelection(){
+  if(!confirm(selectedIds.size + " opération(s) vont être supprimées définitivement. Continuer ?")) return;
+  const ids = [...selectedIds];
+  state.transactions = state.transactions.filter(t=>!selectedIds.has(t.id));
+  selectedIds.clear();
+  ids.forEach(id=>persistTxDelete(id));
+  renderAll();
 }
 
 function renderKpis(){
@@ -1066,6 +1220,7 @@ function importBackup(file){
       state.famTitle = parsed.famTitle || state.famTitle;
       state.categories = parsed.categories || state.categories;
       state.rules = parsed.rules || state.rules;
+      state.imports = parsed.imports || state.imports;
       const importedTxs = parsed.transactions || [];
       importedTxs.forEach(t=>{
         const idx = state.transactions.findIndex(x=>x.id===t.id);
@@ -1095,11 +1250,45 @@ function exportCsv(){
 }
 
 /* ---------------- Rendu global ---------------- */
+function renderImportBatches(){
+  const box = document.getElementById("importBatchesBox");
+  const tbody = document.getElementById("importBatchesTable");
+  if(!state.imports || state.imports.length === 0){
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "block";
+  tbody.innerHTML = state.imports.map(b=>{
+    const dt = new Date(b.importedAt);
+    const when = isNaN(dt) ? "" : dt.toLocaleString("fr-FR");
+    return `<tr>
+      <td>${b.fileName || "(sans nom)"}</td>
+      <td>${when}</td>
+      <td class="num">${b.count}</td>
+      <td><button class="btn secondary small" onclick="removeImportBatch('${b.id}')">Supprimer cet import</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function removeImportBatch(batchId){
+  const batch = state.imports.find(b=>b.id===batchId);
+  if(!batch) return;
+  if(!confirm(`Supprimer les ${batch.count} opération(s) de l'import « ${batch.fileName||"sans nom"} » ? Cette action est irréversible.`)) return;
+  const toDelete = state.transactions.filter(t=>t.batchId===batchId).map(t=>t.id);
+  state.transactions = state.transactions.filter(t=>t.batchId!==batchId);
+  state.imports = state.imports.filter(b=>b.id!==batchId);
+  selectedIds.forEach(id=>{ if(toDelete.includes(id)) selectedIds.delete(id); });
+  persistConfig();
+  toDelete.forEach(id=>persistTxDelete(id));
+  renderAll();
+}
+
 function renderAll(){
   renderCategories();
   renderRules();
   renderTransactions();
   renderDashboard();
+  renderImportBatches();
 }
 initStorage();
 </script>
