@@ -1268,7 +1268,14 @@ subPopoverEl.addEventListener("click", (e)=>{
 document.addEventListener("click", (e)=>{
   if(!e.target.closest("#catMenuPopover") && !e.target.closest("#catSubmenuPopover") && !e.target.closest(".cat-cell-btn")) closeCategoryPicker();
 });
-window.addEventListener("scroll", closeCategoryPicker, true);
+window.addEventListener("scroll", (e)=>{
+  // Ne pas fermer si c'est le défilement à l'intérieur du menu (ou de son sous-menu) lui-même,
+  // seulement si c'est la page ou le tableau en arrière-plan qui défile.
+  const t = e.target;
+  if(t && t.closest && (t.closest("#catMenuPopover") || t.closest("#catSubmenuPopover"))) return;
+  if(t === mainPopoverEl || t === subPopoverEl) return;
+  closeCategoryPicker();
+}, true);
 window.addEventListener("resize", closeCategoryPicker);
 
 function setCategoryOnTxByLabel(id, label){
