@@ -116,6 +116,20 @@
   }
   .cat-cell-btn:hover{ border-color:var(--green); }
   .cat-cell-btn.empty{ color:var(--muted); font-style:italic; }
+  /* ---- Fenêtres de dialogue maison (remplacent alert/confirm/prompt,
+     bloqués dans certains cadres sécurisés comme le lien Claude publié) ---- */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:3000;
+    align-items:center; justify-content:center; padding:16px;
+  }
+  .modal-overlay.open{ display:flex; }
+  .modal-box{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; max-width:420px; width:100%; }
+  .modal-box h2{ font-family:var(--font-display); font-size:17px; margin:0 0 8px; }
+  .modal-box .sub{ margin:0 0 14px; white-space:pre-wrap; }
+  .modal-field{ margin-bottom:10px; }
+  .modal-error{ color:var(--terracotta); font-size:12.5px; margin-top:8px; display:none; }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+
   .cat-menu{
     position:fixed; z-index:1000; background:var(--surface); border:1px solid var(--border); border-radius:5px;
     box-shadow:0 8px 24px rgba(0,0,0,.25); min-width:190px; max-width:230px; max-height:70vh; overflow-y:auto;
@@ -412,12 +426,94 @@
   <div id="catMenuPopover" class="cat-menu"></div>
   <div id="catSubmenuPopover" class="cat-menu"></div>
 
+  <div id="modalOverlay" class="modal-overlay">
+    <div class="modal-box">
+      <h2 id="modalTitle"></h2>
+      <p class="sub" id="modalMessage"></p>
+      <div id="modalFields"></div>
+      <p class="modal-error" id="modalError"></p>
+      <div class="modal-actions">
+        <button class="btn secondary small" id="modalCancelBtn" onclick="closeModal()">Annuler</button>
+        <button class="btn small" id="modalOkBtn" onclick="modalOk()">OK</button>
+      </div>
+    </div>
+  </div>
+
   <footer>Vos opérations restent dans ce navigateur. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
 </div>
 
 <script>
 const STORAGE_KEY = "familyBudget_v1";
 function uid(){ return Math.random().toString(36).slice(2,10); }
+
+/* ---------------- Fenêtres de dialogue maison ----------------
+   Remplacent window.alert/confirm/prompt, qui peuvent être bloqués
+   dans certains cadres sécurisés (ex. le lien Claude publié). */
+let modalState = null;
+
+function openModal({ title="", message="", fields=[], confirmLabel="OK", cancelLabel="Annuler", danger=false, hideCancel=false, onConfirm }){
+  document.getElementById("modalTitle").textContent = title;
+  document.getElementById("modalTitle").style.display = title ? "block" : "none";
+  document.getElementById("modalMessage").textContent = message;
+  const fieldsBox = document.getElementById("modalFields");
+  fieldsBox.innerHTML = fields.map(f=>`
+    <div class="modal-field">
+      ${f.label ? `<label>${f.label}</label>` : ""}
+      <input type="text" id="modalField_${f.id}" placeholder="${(f.placeholder||"").replace(/"/g,'&quot;')}" value="${(f.value!=null?f.value:"").toString().replace(/"/g,'&quot;')}">
+    </div>`).join("");
+  const errEl = document.getElementById("modalError");
+  errEl.textContent = ""; errEl.style.display = "none";
+  const okBtn = document.getElementById("modalOkBtn");
+  okBtn.textContent = confirmLabel;
+  okBtn.style.background = danger ? "var(--terracotta)" : "";
+  const cancelBtn = document.getElementById("modalCancelBtn");
+  cancelBtn.textContent = cancelLabel;
+  cancelBtn.style.display = hideCancel ? "none" : "inline-block";
+  modalState = { fields, onConfirm };
+  document.getElementById("modalOverlay").classList.add("open");
+  setTimeout(()=>{ const first = fieldsBox.querySelector("input"); if(first) first.focus(); else okBtn.focus(); }, 30);
+}
+function closeModal(){
+  document.getElementById("modalOverlay").classList.remove("open");
+  modalState = null;
+}
+function showModalError(msg){
+  const el = document.getElementById("modalError");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function modalOk(){
+  if(!modalState) return;
+  const values = {};
+  modalState.fields.forEach(f=>{ const el = document.getElementById("modalField_"+f.id); if(el) values[f.id] = el.value; });
+  const result = modalState.onConfirm ? modalState.onConfirm(values) : true;
+  if(result !== false) closeModal();
+}
+// Entrée clavier = valider quand la modale est ouverte
+document.getElementById("modalOverlay").addEventListener("keydown", (e)=>{ if(e.key === "Enter") modalOk(); });
+
+function appAlert(message, title=""){
+  openModal({ title, message, fields:[], confirmLabel:"OK", hideCancel:true, onConfirm:()=>true });
+}
+function appConfirm(message, onYes, { title="", confirmLabel="Confirmer" }={}){
+  openModal({ title, message, fields:[], confirmLabel, danger:true, onConfirm:()=>{ onYes(); return true; } });
+}
+function appConfirmTyped(message, requireText, onYes, { title="" }={}){
+  openModal({
+    title, message,
+    fields: [{ id:"txt", placeholder:"Tapez " + requireText }],
+    confirmLabel:"Confirmer", danger:true,
+    onConfirm: (v)=>{
+      if((v.txt||"").trim() !== requireText){
+        showModalError("Le texte tapé ne correspond pas à " + requireText + ".");
+        return false;
+      }
+      onYes();
+      return true;
+    }
+  });
+}
+
 function euro(n){ if(!isFinite(n)) n=0; return n.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €"; }
 
 function defaultCategories(){
@@ -490,7 +586,7 @@ function showSyncBanner(mode){
 
 function connectDrive(){
   const url = document.getElementById("scriptUrlInput").value.trim();
-  if(!url){ alert("Collez d'abord le lien de votre script Google (se terminant par /exec)."); return; }
+  if(!url){ appAlert("Collez d'abord le lien de votre script Google (se terminant par /exec)."); return; }
   scriptUrl = url;
   localStorage.setItem(SCRIPT_URL_KEY, scriptUrl);
   refreshFromDrive(true);
@@ -541,7 +637,7 @@ async function refreshFromDrive(isInitial){
   }
 }
 function manualRefresh(){
-  if(!scriptUrl){ alert("Connectez-vous d'abord."); return; }
+  if(!scriptUrl){ appAlert("Connectez-vous d'abord."); return; }
   refreshFromDrive(false);
 }
 
@@ -688,7 +784,7 @@ function reapplyRules(){
   });
   persistTxBulk(changed);
   renderAll();
-  alert(changed.length + " opération(s) classée(s) par les règles.");
+  appAlert(changed.length + " opération(s) classée(s) par les règles.");
 }
 
 /* ---------------- Import CSV ---------------- */
@@ -730,7 +826,7 @@ function handleFile(file){
     const text = decodeCsvBuffer(e.target.result);
     parseCsvText(text);
   };
-  reader.onerror = ()=> alert("Impossible de lire ce fichier CSV.");
+  reader.onerror = ()=> appAlert("Impossible de lire ce fichier CSV.");
   reader.readAsArrayBuffer(file);
 }
 
@@ -741,7 +837,7 @@ function parseCsvText(text){
     delimitersToGuess: [',',';','\t','|'],
     complete: (res)=>{
       const raw = res.data;
-      if(!raw || raw.length === 0){ alert("Fichier vide ou illisible."); return; }
+      if(!raw || raw.length === 0){ appAlert("Fichier vide ou illisible."); return; }
       // Certains logiciels/banques ajoutent plusieurs lignes d'info avant la vraie
       // ligne d'en-têtes : on cherche la première ligne dont une cellule commence par "date".
       let headerIdx = raw.findIndex(row => row.some(cell => (cell||"").trim().toLowerCase().startsWith("date")));
@@ -762,10 +858,10 @@ function parseCsvText(text){
         preambleHint.style.display = "none";
       }
 
-      if(parsedRows.length === 0){ alert("Aucune opération trouvée dans ce fichier."); return; }
+      if(parsedRows.length === 0){ appAlert("Aucune opération trouvée dans ce fichier."); return; }
       showMapping();
     },
-    error: ()=> alert("Impossible de lire ce fichier CSV.")
+    error: ()=> appAlert("Impossible de lire ce fichier CSV.")
   });
 }
 
@@ -818,7 +914,7 @@ function toggleAmountMode(){
 });
 
 function checkMissingFromFile(){
-  if(!parsedRows){ alert("Déposez et mappez d'abord un fichier CSV ci-dessus."); return; }
+  if(!parsedRows){ appAlert("Déposez et mappez d'abord un fichier CSV ci-dessus."); return; }
   const dateCol = document.getElementById("mapDate").value;
   const labelCol = document.getElementById("mapLabel").value;
 
@@ -829,7 +925,7 @@ function checkMissingFromFile(){
     return (date && label) ? { date, label, amount } : null;
   }).filter(Boolean);
 
-  if(fileEntries.length === 0){ alert("Aucune ligne exploitable dans ce fichier pour faire la comparaison."); return; }
+  if(fileEntries.length === 0){ appAlert("Aucune ligne exploitable dans ce fichier pour faire la comparaison."); return; }
 
   const dates = fileEntries.map(e=>e.date).sort();
   const minDate = dates[0], maxDate = dates[dates.length-1];
@@ -1026,7 +1122,7 @@ function confirmImport(){
   document.getElementById("missingBox").style.display = "none";
   document.getElementById("csvFile").value = "";
   renderAll();
-  alert(`${added} opération(s) importée(s) (dont ${fromFile} déjà catégorisée(s) depuis le fichier). ${skipped} doublon(s) ignoré(s).`);
+  appAlert(`${added} opération(s) importée(s) (dont ${fromFile} déjà catégorisée(s) depuis le fichier). ${skipped} doublon(s) ignoré(s).`);
   document.querySelector('nav.tabs button[data-view="transactions"]').click();
 }
 
@@ -1181,7 +1277,7 @@ function setCategoryOnTxByLabel(id, label){
   const cat = findCategoryByLabel(trimmed);
   if(cat){ setCategoryOnTx(id, cat.id); }
   else{
-    alert("Catégorie inconnue : « " + trimmed + " ». Choisissez-en une dans la liste proposée.");
+    appAlert("Catégorie inconnue : « " + trimmed + " ». Choisissez-en une dans la liste proposée.");
     renderTransactions(); // remet l'ancienne valeur affichée
   }
 }
@@ -1303,7 +1399,7 @@ function renderBulkBar(){
 
 function bulkAssignCategory(){
   const cat = findCategoryByLabel(document.getElementById("bulkCategorySelect").value);
-  if(!cat){ alert("Choisissez une catégorie dans la liste proposée."); return; }
+  if(!cat){ appAlert("Choisissez une catégorie dans la liste proposée."); return; }
   const changed = [];
   state.transactions.forEach(t=>{
     if(selectedIds.has(t.id)){ t.categoryId = cat.id; t.source = "manual"; changed.push(t); }
@@ -1313,12 +1409,13 @@ function bulkAssignCategory(){
 }
 
 function bulkDeleteSelection(){
-  if(!confirm(selectedIds.size + " opération(s) vont être supprimées définitivement. Continuer ?")) return;
-  const ids = [...selectedIds];
-  state.transactions = state.transactions.filter(t=>!selectedIds.has(t.id));
-  selectedIds.clear();
-  ids.forEach(id=>persistTxDelete(id));
-  renderAll();
+  appConfirm(selectedIds.size + " opération(s) vont être supprimées définitivement. Continuer ?", ()=>{
+    const ids = [...selectedIds];
+    state.transactions = state.transactions.filter(t=>!selectedIds.has(t.id));
+    selectedIds.clear();
+    ids.forEach(id=>persistTxDelete(id));
+    renderAll();
+  });
 }
 
 function renderKpis(){
@@ -1342,22 +1439,26 @@ function renderKpis(){
 
 function editOpeningBalance(){
   const ob = state.openingBalance || { date: "", amount: 0 };
-  const dateInput = prompt(
-    "Date à laquelle votre compte affichait le solde ci-dessous (le jour juste avant votre toute première opération importée), au format JJ/MM/AAAA :",
-    ob.date ? ob.date.split("-").reverse().join("/") : ""
-  );
-  if(dateInput === null) return;
-  const date = parseFlexDate(dateInput.trim());
-  if(dateInput.trim() && !date){ alert("Date non reconnue."); return; }
-
-  const amtInput = prompt("Solde de votre compte à cette date (€) :", ob.amount || 0);
-  if(amtInput === null) return;
-  const amount = parseFrenchNumber(amtInput);
-  if(isNaN(amount)){ alert("Montant invalide."); return; }
-
-  state.openingBalance = { date: date || "", amount };
-  persistConfig();
-  renderKpis();
+  openModal({
+    title: "Solde initial",
+    message: "Date à laquelle votre compte affichait ce solde (le jour juste avant votre toute première opération importée), et le montant à cette date.",
+    fields: [
+      { id:"date", label:"Date (JJ/MM/AAAA)", placeholder:"JJ/MM/AAAA", value: ob.date ? ob.date.split("-").reverse().join("/") : "" },
+      { id:"amount", label:"Solde (€)", placeholder:"0", value: ob.amount || 0 }
+    ],
+    confirmLabel: "Enregistrer",
+    onConfirm: (v)=>{
+      const dateRaw = (v.date||"").trim();
+      const date = dateRaw ? parseFlexDate(dateRaw) : "";
+      if(dateRaw && !date){ showModalError("Date non reconnue. Utilisez le format JJ/MM/AAAA."); return false; }
+      const amount = parseFrenchNumber(v.amount);
+      if(isNaN(amount)){ showModalError("Montant invalide."); return false; }
+      state.openingBalance = { date: date || "", amount };
+      persistConfig();
+      renderKpis();
+      return true;
+    }
+  });
 }
 
 /* ---------------- Tri IA ---------------- */
@@ -1387,13 +1488,15 @@ function updateAiAvailability(){
 
 async function runAiSort(){
   if(!sampleCap){
-    if(confirm("Le tri par IA n'est disponible que via le lien Claude publié. Ouvrir cet outil en ligne dans un nouvel onglet ?")){
-      window.open(ARTIFACT_URL, "_blank", "noopener");
-    }
+    appConfirm(
+      "Le tri par IA n'est disponible que via le lien Claude publié. Ouvrir cet outil en ligne dans un nouvel onglet ?",
+      ()=>{ window.open(ARTIFACT_URL, "_blank", "noopener"); },
+      { confirmLabel: "Ouvrir" }
+    );
     return;
   }
   const uncategorized = state.transactions.filter(t=>!t.categoryId).slice(0, 40);
-  if(uncategorized.length === 0){ alert("Tout est déjà catégorisé !"); return; }
+  if(uncategorized.length === 0){ appAlert("Tout est déjà catégorisé !"); return; }
   const btn = document.getElementById("aiSortBtn");
   btn.disabled = true;
   const originalText = btn.textContent;
@@ -1447,12 +1550,12 @@ Réponds UNIQUEMENT avec un objet JSON de la forme {"assignments":[{"index":0,"c
     renderAll();
     if(ruleCandidates.length){
       showAiRulesReview(ruleCandidates);
-      alert(applied + " opération(s) classée(s) par l'IA. " + ruleCandidates.length + " règle(s) proposée(s) — à valider ci-dessous pour les prochains imports.");
+      appAlert(applied + " opération(s) classée(s) par l'IA. " + ruleCandidates.length + " règle(s) proposée(s) — à valider ci-dessous pour les prochains imports.");
     }else{
-      alert(applied + " opération(s) classée(s) par l'IA. Vérifiez et ajustez si besoin.");
+      appAlert(applied + " opération(s) classée(s) par l'IA. Vérifiez et ajustez si besoin.");
     }
   }catch(err){
-    alert("Le tri par IA a échoué (" + (err && err.code || "erreur") + "). Réessayez plus tard.");
+    appAlert("Le tri par IA a échoué (" + (err && err.code || "erreur") + "). Réessayez plus tard.");
   }finally{
     btn.disabled = false;
     btn.textContent = originalText;
@@ -1484,7 +1587,7 @@ function confirmAiRules(){
   });
   if(added){ persistConfig(); renderRules(); }
   dismissAiRules();
-  alert(added + " règle(s) ajoutée(s).");
+  appAlert(added + " règle(s) ajoutée(s).");
 }
 function dismissAiRules(){
   pendingAiRules = [];
@@ -1646,55 +1749,55 @@ async function saveFile(filename, text, mime){
 
 function resetTransactionsData(){
   if(state.transactions.length === 0 && state.imports.length === 0){
-    alert("Il n'y a aucune opération à réinitialiser.");
+    appAlert("Il n'y a aucune opération à réinitialiser.");
     return;
   }
   const cloudNote = (storageMode === "google" && scriptUrl)
     ? " — et écrasera aussi la sauvegarde sur votre Google Drive connecté"
     : "";
-  const answer = prompt(
-    `Ceci supprime DÉFINITIVEMENT les ${state.transactions.length} opération(s) et l'historique d'import de ce navigateur${cloudNote}. Les catégories et règles ne sont PAS touchées.\n\nTapez RESET (en majuscules) pour confirmer :`
-  );
-  if(answer !== "RESET"){
-    if(answer !== null) alert("Réinitialisation annulée : le texte tapé ne correspond pas.");
-    return;
-  }
-  closeCategoryPicker();
-  dismissAiRules();
-  selectedIds.clear();
-  parsedRows = null; parsedHeaders = null; currentImportFileName = ""; duplicateMatches = [];
-  document.getElementById("mappingBox").style.display = "none";
-  document.getElementById("duplicatesBox").style.display = "none";
-  document.getElementById("missingBox").style.display = "none";
-  document.getElementById("csvFile").value = "";
+  appConfirmTyped(
+    `Ceci supprime DÉFINITIVEMENT les ${state.transactions.length} opération(s) et l'historique d'import de ce navigateur${cloudNote}. Les catégories et règles ne sont PAS touchées.`,
+    "RESET",
+    ()=>{
+      closeCategoryPicker();
+      dismissAiRules();
+      selectedIds.clear();
+      parsedRows = null; parsedHeaders = null; currentImportFileName = ""; duplicateMatches = [];
+      document.getElementById("mappingBox").style.display = "none";
+      document.getElementById("duplicatesBox").style.display = "none";
+      document.getElementById("missingBox").style.display = "none";
+      document.getElementById("csvFile").value = "";
 
-  state.transactions = [];
-  state.imports = [];
-  saveLocal();
-  if(storageMode === "google" && scriptUrl) schedulePersist();
-  renderAll();
-  alert("Toutes les opérations ont été supprimées. Vous pouvez réimporter votre relevé depuis le début.");
+      state.transactions = [];
+      state.imports = [];
+      saveLocal();
+      if(storageMode === "google" && scriptUrl) schedulePersist();
+      renderAll();
+      appAlert("Toutes les opérations ont été supprimées. Vous pouvez réimporter votre relevé depuis le début.");
+    },
+    { title: "Réinitialiser les opérations" }
+  );
 }
 
 function resetCategoriesData(){
   const cloudNote = (storageMode === "google" && scriptUrl)
     ? " — et écrasera aussi la sauvegarde sur votre Google Drive connecté"
     : "";
-  const answer = prompt(
-    `Ceci réinitialise les catégories (retour aux catégories par défaut) et supprime toutes les règles${cloudNote}. Les opérations déjà catégorisées perdront leur catégorie (mais restent dans le journal). Les opérations elles-mêmes ne sont PAS touchées.\n\nTapez RESET (en majuscules) pour confirmer :`
+  appConfirmTyped(
+    `Ceci réinitialise les catégories (retour aux catégories par défaut) et supprime toutes les règles${cloudNote}. Les opérations déjà catégorisées perdront leur catégorie (mais restent dans le journal). Les opérations elles-mêmes ne sont PAS touchées.`,
+    "RESET",
+    ()=>{
+      closeCategoryPicker();
+      state.categories = defaultCategories();
+      state.rules = [];
+      state.transactions.forEach(t=>{ t.categoryId = ""; t.source = ""; });
+      persistConfig();
+      persistTxBulk(state.transactions);
+      renderAll();
+      appAlert("Les catégories et règles ont été réinitialisées.");
+    },
+    { title: "Réinitialiser les catégories" }
   );
-  if(answer !== "RESET"){
-    if(answer !== null) alert("Réinitialisation annulée : le texte tapé ne correspond pas.");
-    return;
-  }
-  closeCategoryPicker();
-  state.categories = defaultCategories();
-  state.rules = [];
-  state.transactions.forEach(t=>{ t.categoryId = ""; t.source = ""; });
-  persistConfig();
-  persistTxBulk(state.transactions);
-  renderAll();
-  alert("Les catégories et règles ont été réinitialisées.");
 }
 
 function exportBackup(){
@@ -1724,7 +1827,7 @@ function importBackup(file){
       famTitleInput.value = state.famTitle;
       renderAll();
     }catch(err){
-      alert("Ce fichier ne ressemble pas à une sauvegarde valide.");
+      appAlert("Ce fichier ne ressemble pas à une sauvegarde valide.");
     }
   };
   reader.readAsText(file);
@@ -1766,14 +1869,18 @@ function renderImportBatches(){
 function removeImportBatch(batchId){
   const batch = state.imports.find(b=>b.id===batchId);
   if(!batch) return;
-  if(!confirm(`Supprimer les ${batch.count} opération(s) de l'import « ${batch.fileName||"sans nom"} » ? Cette action est irréversible.`)) return;
-  const toDelete = state.transactions.filter(t=>t.batchId===batchId).map(t=>t.id);
-  state.transactions = state.transactions.filter(t=>t.batchId!==batchId);
-  state.imports = state.imports.filter(b=>b.id!==batchId);
-  selectedIds.forEach(id=>{ if(toDelete.includes(id)) selectedIds.delete(id); });
-  persistConfig();
-  toDelete.forEach(id=>persistTxDelete(id));
-  renderAll();
+  appConfirm(
+    `Supprimer les ${batch.count} opération(s) de l'import « ${batch.fileName||"sans nom"} » ? Cette action est irréversible.`,
+    ()=>{
+      const toDelete = state.transactions.filter(t=>t.batchId===batchId).map(t=>t.id);
+      state.transactions = state.transactions.filter(t=>t.batchId!==batchId);
+      state.imports = state.imports.filter(b=>b.id!==batchId);
+      selectedIds.forEach(id=>{ if(toDelete.includes(id)) selectedIds.delete(id); });
+      persistConfig();
+      toDelete.forEach(id=>persistTxDelete(id));
+      renderAll();
+    }
+  );
 }
 
 function renderAll(){
