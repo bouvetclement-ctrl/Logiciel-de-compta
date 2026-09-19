@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:#F6F3EA; --surface:#FFFFFF; --surface-2:#EFEADB; --border:#DAD3BE;
@@ -106,6 +107,41 @@
   .tag.none{ background:rgba(181,83,60,.14); color:var(--terracotta); }
 
   .catsel{ font-size:12.5px; padding:5px 6px; }
+
+  /* ---- Sélecteur de catégorie (menu à survol) ---- */
+  .cat-cell-btn{
+    font: inherit; font-size:12.5px; background:var(--surface-2); border:1px solid var(--border);
+    color:var(--ink); border-radius:3px; padding:5px 8px; cursor:pointer; text-align:left; width:100%;
+    max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .cat-cell-btn:hover{ border-color:var(--green); }
+  .cat-cell-btn.empty{ color:var(--muted); font-style:italic; }
+  .cat-menu{
+    position:fixed; z-index:1000; background:var(--surface); border:1px solid var(--border); border-radius:5px;
+    box-shadow:0 8px 24px rgba(0,0,0,.25); min-width:190px; max-width:230px; max-height:70vh; overflow-y:auto;
+    padding:4px; display:none;
+  }
+  .cat-menu.open{ display:block; }
+  .cat-menu button{
+    display:block; width:100%; text-align:left; background:none; border:none; font:inherit; font-size:13px;
+    color:var(--ink); padding:7px 10px; border-radius:3px; cursor:pointer;
+  }
+  .cat-menu button:hover{ background:var(--surface-2); }
+  .cat-menu .cat-leaf-clear{ color:var(--muted); border-top:1px solid var(--border); margin-top:4px; padding-top:8px; }
+  .cat-group-item{ position:relative; }
+  .cat-group-item > .cat-group-label{
+    display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left; background:none;
+    border:none; font:inherit; font-size:13px; color:var(--ink); padding:7px 10px; border-radius:3px; cursor:pointer;
+  }
+  .cat-group-item > .cat-group-label:hover{ background:var(--surface-2); }
+  .cat-submenu{
+    display:none; position:absolute; left:100%; top:-4px; background:var(--surface); border:1px solid var(--border);
+    border-radius:5px; box-shadow:0 8px 24px rgba(0,0,0,.25); min-width:170px; max-height:60vh; overflow-y:auto; padding:4px;
+  }
+  .cat-group-item:hover > .cat-submenu, .cat-group-item.open > .cat-submenu{ display:block; }
+  @media (max-width:700px){
+    .cat-submenu{ left:0; top:100%; } /* évite de sortir de l'écran sur mobile */
+  }
 
   .drop{ border:2px dashed var(--border); border-radius:6px; padding:26px; text-align:center; color:var(--muted); }
   .drop.drag{ border-color:var(--green); color:var(--green); }
@@ -286,7 +322,7 @@
         <table>
           <thead><tr>
             <th><input type="checkbox" id="selectAllChk" onchange="toggleSelectAll(this.checked)" style="width:auto;"></th>
-            <th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Catégorie</th><th>Origine</th><th></th>
+            <th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Catégorie</th><th>Sous-catégorie</th><th>Origine</th><th></th>
           </tr></thead>
           <tbody id="txTable"></tbody>
         </table>
@@ -342,6 +378,16 @@
   <!-- ============ DASHBOARD ============ -->
   <section class="view" id="view-dashboard">
     <div class="card">
+      <h2>Évolution mensuelle</h2>
+      <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
+      <canvas id="chartMonthly" height="110"></canvas>
+    </div>
+    <div class="card">
+      <h2>Habitudes de dépense par catégorie</h2>
+      <p class="sub" id="chartCatSub">Évolution mensuelle des principaux postes de dépense.</p>
+      <canvas id="chartByCategory" height="130"></canvas>
+    </div>
+    <div class="card">
       <div class="toolbar">
         <h2 style="margin:0;">Répartition par catégorie</h2>
         <select id="dashMonth" onchange="renderDashboard()" style="max-width:180px;"></select>
@@ -351,7 +397,7 @@
       <div id="dashCatsEmpty" class="empty">Aucune dépense catégorisée sur cette période.</div>
     </div>
     <div class="card">
-      <h2>Évolution mensuelle</h2>
+      <h2>Détail mensuel</h2>
       <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
       <div class="table-scroll">
         <table>
@@ -364,6 +410,7 @@
   </section>
 
   <datalist id="categoryDatalist"></datalist>
+  <div id="catMenuPopover" class="cat-menu"></div>
 
   <footer>Vos opérations restent dans ce navigateur. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
 </div>
@@ -943,6 +990,79 @@ function setCategoryOnTx(id, categoryId){
   persistTxUpsert(t);
   renderTransactions();
 }
+
+/* ---- Menu de sélection de catégorie (survol pour les sous-catégories) ---- */
+let activePickerTxId = null;
+
+function buildCategoryMenuHTML(){
+  const groups = {};
+  const flat = [];
+  state.categories.forEach(c=>{
+    if(c.group) (groups[c.group] = groups[c.group] || []).push(c);
+    else flat.push(c);
+  });
+  let html = "";
+  flat.sort((a,b)=>a.name.localeCompare(b.name,"fr")).forEach(c=>{
+    html += `<button type="button" class="cat-leaf" data-cat="${c.id}">${c.name}</button>`;
+  });
+  Object.keys(groups).sort((a,b)=>a.localeCompare(b,"fr")).forEach(g=>{
+    const subs = groups[g].sort((a,b)=>a.name.localeCompare(b.name,"fr"));
+    html += `<div class="cat-group-item">
+      <button type="button" class="cat-group-label">${g} <span>▸</span></button>
+      <div class="cat-submenu">
+        ${subs.map(c=>`<button type="button" class="cat-leaf" data-cat="${c.id}">${c.name}</button>`).join("")}
+      </div>
+    </div>`;
+  });
+  html += `<button type="button" class="cat-leaf cat-leaf-clear" data-cat="">— Aucune —</button>`;
+  return html;
+}
+
+function openCategoryPicker(evt, txId){
+  evt.stopPropagation();
+  const popover = document.getElementById("catMenuPopover");
+  const alreadyOpenForThis = popover.classList.contains("open") && activePickerTxId === txId;
+  closeCategoryPicker();
+  if(alreadyOpenForThis) return; // un second clic sur le même bouton referme le menu
+
+  activePickerTxId = txId;
+  popover.innerHTML = buildCategoryMenuHTML();
+
+  const rect = evt.currentTarget.getBoundingClientRect();
+  popover.style.left = Math.min(rect.left, window.innerWidth - 240) + "px";
+  popover.style.top = Math.min(rect.bottom + 4, window.innerHeight - 60) + "px";
+  popover.classList.add("open");
+}
+
+function closeCategoryPicker(){
+  const popover = document.getElementById("catMenuPopover");
+  popover.classList.remove("open");
+  activePickerTxId = null;
+}
+
+document.getElementById("catMenuPopover").addEventListener("click", (e)=>{
+  const groupLabel = e.target.closest(".cat-group-label");
+  if(groupLabel){
+    // support tactile : un clic bascule l'ouverture du sous-menu (le survol fait déjà le travail sur ordinateur)
+    e.stopPropagation();
+    const item = groupLabel.closest(".cat-group-item");
+    const wasOpen = item.classList.contains("open");
+    document.querySelectorAll("#catMenuPopover .cat-group-item.open").forEach(el=>el.classList.remove("open"));
+    if(!wasOpen) item.classList.add("open");
+    return;
+  }
+  const leaf = e.target.closest(".cat-leaf");
+  if(leaf && activePickerTxId){
+    setCategoryOnTx(activePickerTxId, leaf.dataset.cat || "");
+    closeCategoryPicker();
+  }
+});
+document.addEventListener("click", (e)=>{
+  if(!e.target.closest("#catMenuPopover") && !e.target.closest(".cat-cell-btn")) closeCategoryPicker();
+});
+window.addEventListener("scroll", closeCategoryPicker, true);
+window.addEventListener("resize", closeCategoryPicker);
+
 function setCategoryOnTxByLabel(id, label){
   const trimmed = (label||"").trim();
   if(trimmed === ""){ setCategoryOnTx(id, ""); return; }
@@ -1008,7 +1128,7 @@ function renderTransactions(){
         lastMonth = mk;
         const monthTotal = rows.filter(r=>monthKey(r.date)===mk).reduce((s,r)=>s+r.amount,0);
         const trh = document.createElement("tr");
-        trh.innerHTML = `<td colspan="7" style="background:var(--surface-2); font-family:var(--font-display); font-weight:600; font-size:13px;">
+        trh.innerHTML = `<td colspan="8" style="background:var(--surface-2); font-family:var(--font-display); font-weight:600; font-size:13px;">
           ${mk} <span class="hint" style="margin-left:8px;">solde du mois : ${(monthTotal>=0?"+":"")+euro(monthTotal)}</span>
         </td>`;
         tbody.appendChild(trh);
@@ -1020,14 +1140,16 @@ function renderTransactions(){
       : t.source === "import" ? '<span class="tag import">fichier</span>'
       : t.source === "manual" ? '<span class="tag manual">manuel</span>'
       : '<span class="tag none">à trier</span>';
+    const cat = t.categoryId ? state.categories.find(c=>c.id===t.categoryId) : null;
+    const mainLabel = cat ? (cat.group || cat.name) : "";
+    const subLabel = cat && cat.group ? cat.name : "";
     tr.innerHTML = `
       <td><input type="checkbox" class="rowChk" data-id="${t.id}" style="width:auto;" ${selectedIds.has(t.id)?"checked":""}></td>
       <td>${t.date||"—"}</td>
       <td>${t.label}</td>
       <td class="num amt ${t.amount>=0?'pos':'neg'}">${euro(t.amount)}</td>
-      <td><input type="text" class="catsel" list="categoryDatalist" placeholder="—"
-            value="${t.categoryId ? categoryLabel(state.categories.find(c=>c.id===t.categoryId)||{name:''}) : ""}"
-            onchange="setCategoryOnTxByLabel('${t.id}', this.value)"></td>
+      <td><button type="button" class="cat-cell-btn ${mainLabel?"":"empty"}" onclick="openCategoryPicker(event,'${t.id}')">${mainLabel || "Choisir…"}</button></td>
+      <td><button type="button" class="cat-cell-btn ${subLabel?"":"empty"}" onclick="openCategoryPicker(event,'${t.id}')">${subLabel || "—"}</button></td>
       <td>${badge}</td>
       <td><button class="icon-btn" onclick="removeTx('${t.id}')">✕</button></td>`;
     tr.querySelector(".rowChk").addEventListener("change", (e)=>{
@@ -1231,6 +1353,88 @@ function dismissAiRules(){
 }
 
 /* ---------------- Dashboard ---------------- */
+let chartMonthlyInstance = null, chartByCategoryInstance = null;
+const CAT_CHART_COLORS = ["#2F5D50","#B5533C","#B4881E","#3A6EA5","#7A4C9E","#4C8C4A","#C2534F","#5B7A99"];
+
+function categoryBucketLabel(cat){
+  if(!cat) return "Non catégorisé";
+  return cat.group || cat.name;
+}
+
+function renderMonthlyChart(monthsAsc){
+  const ctx = document.getElementById("chartMonthly");
+  if(chartMonthlyInstance){ chartMonthlyInstance.destroy(); chartMonthlyInstance = null; }
+  if(typeof Chart === "undefined" || monthsAsc.length === 0) return;
+  const inData = monthsAsc.map(m=>state.transactions.filter(t=>monthKey(t.date)===m && t.amount>0).reduce((s,t)=>s+t.amount,0));
+  const outData = monthsAsc.map(m=>state.transactions.filter(t=>monthKey(t.date)===m && t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0));
+  const netData = monthsAsc.map((m,i)=>inData[i]-outData[i]);
+  chartMonthlyInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: monthsAsc,
+      datasets: [
+        { label: "Revenus", data: inData, borderColor: "#2F5D50", backgroundColor: "rgba(47,93,80,.15)", tension: .25 },
+        { label: "Dépenses", data: outData, borderColor: "#B5533C", backgroundColor: "rgba(181,83,60,.15)", tension: .25 },
+        { label: "Solde", data: netData, borderColor: "#B4881E", borderDash: [5,4], tension: .25 }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom" } },
+      scales: { y: { ticks: { callback: (v)=>euro(v) } } }
+    }
+  });
+}
+
+function renderCategoryTrendChart(monthsAsc){
+  const ctx = document.getElementById("chartByCategory");
+  const totals = {};
+  state.transactions.forEach(t=>{
+    if(t.amount >= 0) return;
+    const label = categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId));
+    totals[label] = (totals[label]||0) + Math.abs(t.amount);
+  });
+  const sortedLabels = Object.keys(totals).sort((a,b)=>totals[b]-totals[a]);
+  const TOP_N = 6;
+  const topLabels = sortedLabels.slice(0, TOP_N);
+  const otherLabels = sortedLabels.slice(TOP_N);
+
+  const datasets = topLabels.map((label,i)=>({
+    label,
+    data: monthsAsc.map(m=> state.transactions
+      .filter(t=>monthKey(t.date)===m && t.amount<0 && categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))===label)
+      .reduce((s,t)=>s+Math.abs(t.amount),0)),
+    borderColor: CAT_CHART_COLORS[i % CAT_CHART_COLORS.length],
+    backgroundColor: CAT_CHART_COLORS[i % CAT_CHART_COLORS.length] + "22",
+    tension: .25
+  }));
+  if(otherLabels.length){
+    datasets.push({
+      label: "Autres",
+      data: monthsAsc.map(m=> state.transactions
+        .filter(t=>monthKey(t.date)===m && t.amount<0 && otherLabels.includes(categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))))
+        .reduce((s,t)=>s+Math.abs(t.amount),0)),
+      borderColor: "#8B8674", backgroundColor: "#8B867422", tension: .25, borderDash: [4,3]
+    });
+  }
+
+  document.getElementById("chartCatSub").textContent = topLabels.length
+    ? `Les ${topLabels.length} principaux postes de dépense${otherLabels.length ? " (le reste est regroupé sous « Autres »)" : ""}.`
+    : "Pas encore assez de dépenses catégorisées pour ce graphique.";
+
+  if(chartByCategoryInstance){ chartByCategoryInstance.destroy(); chartByCategoryInstance = null; }
+  if(typeof Chart === "undefined" || topLabels.length === 0 || monthsAsc.length === 0) return;
+  chartByCategoryInstance = new Chart(ctx, {
+    type: "line",
+    data: { labels: monthsAsc, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom" } },
+      scales: { y: { ticks: { callback: (v)=>euro(v) } } }
+    }
+  });
+}
+
 function renderDashboard(){
   const monthFilter = document.getElementById("dashMonth").value;
   const rows = monthFilter ? state.transactions.filter(t=>monthKey(t.date)===monthFilter) : state.transactions;
@@ -1269,6 +1473,10 @@ function renderDashboard(){
       <td class="num" style="font-weight:600; color:${net>=0?'var(--green)':'var(--terracotta)'}">${(net>=0?"+":"")+euro(net)}</td>`;
     mtbody.appendChild(tr);
   });
+
+  const monthsAsc = [...months].sort();
+  renderMonthlyChart(monthsAsc);
+  renderCategoryTrendChart(monthsAsc);
 }
 
 /* ---------------- Export / Import sauvegarde ---------------- */
