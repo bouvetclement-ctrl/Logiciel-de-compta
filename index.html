@@ -249,6 +249,17 @@
             </table>
           </div>
         </div>
+        <button class="btn secondary" onclick="checkMissingFromFile()" style="margin-top:4px;">🔍 Vérifier les opérations absentes de ce relevé</button>
+        <div id="missingBox" class="card" style="display:none; margin:14px 0; padding:14px 16px; background:var(--surface-2);">
+          <h2 style="font-size:15px; margin-bottom:6px;">⚠️ Opérations enregistrées mais absentes de ce relevé</h2>
+          <p class="sub" id="missingIntro" style="margin-bottom:10px;"></p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Date</th><th>Libellé</th><th class="num">Montant</th><th></th></tr></thead>
+              <tbody id="missingTable"></tbody>
+            </table>
+          </div>
+        </div>
         <button class="btn" onclick="confirmImport()" style="margin-top:12px;">Importer ces opérations</button>
       </div>
     </div>
@@ -771,6 +782,7 @@ function guessColumn(headers, candidates){
 
 function showMapping(){
   document.getElementById("mappingBox").style.display = "block";
+  document.getElementById("missingBox").style.display = "none";
   const opts = parsedHeaders.map(h=>`<option value="${h}">${h}</option>`).join("");
   ["mapDate","mapLabel","mapAmount","mapDebit","mapCredit"].forEach(id=>{
     document.getElementById(id).innerHTML = opts;
@@ -803,6 +815,49 @@ function toggleAmountMode(){
 ["mapDate","mapLabel","mapAmount","mapDebit","mapCredit","mapCategory"].forEach(id=>{
   document.addEventListener("change", (e)=>{ if(e.target.id===id){ renderPreview(); checkDuplicates(); } });
 });
+
+function checkMissingFromFile(){
+  if(!parsedRows){ alert("Déposez et mappez d'abord un fichier CSV ci-dessus."); return; }
+  const dateCol = document.getElementById("mapDate").value;
+  const labelCol = document.getElementById("mapLabel").value;
+
+  const fileEntries = parsedRows.map(r=>{
+    const date = parseFlexDate(r[dateCol]);
+    const label = (r[labelCol]||"").trim();
+    const amount = buildRowAmount(r);
+    return (date && label) ? { date, label, amount } : null;
+  }).filter(Boolean);
+
+  if(fileEntries.length === 0){ alert("Aucune ligne exploitable dans ce fichier pour faire la comparaison."); return; }
+
+  const dates = fileEntries.map(e=>e.date).sort();
+  const minDate = dates[0], maxDate = dates[dates.length-1];
+
+  const missing = state.transactions
+    .filter(t=> t.date && t.date >= minDate && t.date <= maxDate)
+    .filter(t=> !fileEntries.some(e=>
+      e.label.trim().toLowerCase() === t.label.trim().toLowerCase() &&
+      Math.abs(e.amount - t.amount) < 0.005 &&
+      daysBetween(e.date, t.date) <= 2
+    ))
+    .sort((a,b)=> a.date.localeCompare(b.date));
+
+  const box = document.getElementById("missingBox");
+  box.style.display = "block";
+  if(missing.length === 0){
+    document.getElementById("missingIntro").textContent =
+      `Aucune opération enregistrée entre le ${minDate} et le ${maxDate} ne semble absente de ce relevé — tout concorde.`;
+    document.getElementById("missingTable").innerHTML = "";
+    return;
+  }
+  document.getElementById("missingIntro").textContent =
+    `${missing.length} opération(s) enregistrée(s) entre le ${minDate} et le ${maxDate} n'apparaissent pas dans ce relevé (même libellé + montant, à 2 jours près introuvables). À vérifier au cas par cas : erreur de saisie, opération annulée par la banque, etc.`;
+  document.getElementById("missingTable").innerHTML = missing.map(t=>`
+    <tr style="background:rgba(181,83,60,.10);">
+      <td>${t.date}</td><td>${t.label}</td><td class="num">${euro(t.amount)}</td>
+      <td><button class="btn secondary small" onclick="removeTx('${t.id}'); checkMissingFromFile();">✕ Supprimer</button></td>
+    </tr>`).join("");
+}
 
 function checkDuplicates(){
   if(!parsedRows) return;
@@ -966,6 +1021,7 @@ function confirmImport(){
   duplicateMatches = [];
   document.getElementById("mappingBox").style.display = "none";
   document.getElementById("duplicatesBox").style.display = "none";
+  document.getElementById("missingBox").style.display = "none";
   document.getElementById("csvFile").value = "";
   renderAll();
   alert(`${added} opération(s) importée(s) (dont ${fromFile} déjà catégorisée(s) depuis le fichier). ${skipped} doublon(s) ignoré(s).`);
@@ -1579,6 +1635,7 @@ function resetTransactionsData(){
   parsedRows = null; parsedHeaders = null; currentImportFileName = ""; duplicateMatches = [];
   document.getElementById("mappingBox").style.display = "none";
   document.getElementById("duplicatesBox").style.display = "none";
+  document.getElementById("missingBox").style.display = "none";
   document.getElementById("csvFile").value = "";
 
   state.transactions = [];
