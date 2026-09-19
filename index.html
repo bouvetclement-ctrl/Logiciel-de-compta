@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#F6F3EA; --surface:#FFFFFF; --surface-2:#EFEADB; --border:#DAD3BE;
@@ -139,7 +138,7 @@
   <header class="led">
     <div>
       <input id="famTitle" type="text" value="Comptes de la famille">
-      <div class="sub">Import bancaire, tri automatique, suivi mensuel — synchronisé sur votre Google Drive.</div>
+      <div class="sub">Import bancaire, tri automatique, suivi mensuel — données conservées dans ce navigateur.</div>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="l">Revenus</div><div class="v pos" id="kpiIn">0,00 €</div></div>
@@ -148,27 +147,24 @@
     </div>
   </header>
 
-  <div id="syncBanner" class="sync-banner local">Vérification du stockage…</div>
+  <div id="syncBanner" class="sync-banner local">Non connecté — stockage local uniquement.</div>
 
   <div class="card" style="padding:16px 18px; margin-bottom:16px;">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-      <h2 style="font-size:15px; margin:0;">🔗 Google Drive</h2>
+      <h2 style="font-size:15px; margin:0;">☁️ Sauvegarde automatique sur Google Drive</h2>
       <div style="display:flex; gap:8px;">
-        <button class="btn small" id="gConnectBtn" onclick="connectGoogle()">Se connecter à Google</button>
+        <button class="btn small" onclick="connectDrive()">Connecter</button>
         <button class="btn secondary small" onclick="manualRefresh()">🔄 Actualiser</button>
-        <button class="btn secondary small" onclick="disconnectGoogle()">Se déconnecter</button>
+        <button class="btn secondary small" onclick="disconnectDrive()">Déconnecter</button>
       </div>
     </div>
     <div class="grid-form" style="margin-top:12px; margin-bottom:6px;">
       <div class="field" style="grid-column: span 2;">
-        <label>Identifiant Google (OAuth Client ID) — propre à votre hébergement</label>
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="gClientId" placeholder="xxxxxxxx.apps.googleusercontent.com">
-          <button class="btn secondary small" onclick="saveGClientId()">Enregistrer</button>
-        </div>
+        <label>Lien de votre script Google (URL se terminant par /exec)</label>
+        <input type="text" id="scriptUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
       </div>
     </div>
-    <p class="hint" id="gStatus" style="margin-top:2px;"></p>
+    <p class="hint" id="driveStatus" style="margin-top:2px;">Pas encore connecté. Voir les instructions de configuration fournies séparément.</p>
   </div>
 
   <nav class="tabs">
@@ -179,8 +175,8 @@
   </nav>
 
   <div class="toolbar">
-    <span class="hint" style="margin:0;">Sauvegardez régulièrement vos données (fichier JSON) pour les transporter ou les partager.</span>
-    <div style="display:flex; gap:8px;">
+    <span class="hint" style="margin:0;">Une sauvegarde manuelle reste possible en complément.</span>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn secondary small" onclick="exportBackup()">⭳ Exporter la sauvegarde</button>
       <button class="btn secondary small" onclick="document.getElementById('importBackupFile').click()">⭱ Importer une sauvegarde</button>
       <input type="file" id="importBackupFile" accept="application/json" style="display:none" onchange="importBackup(this.files[0])">
@@ -316,15 +312,11 @@
     </div>
   </section>
 
-  <footer>Vos données sont stockées dans votre propre Google Drive (fichier « comptes-famille-data.json », accès limité aux fichiers créés par cet outil), ou localement si vous n'êtes pas connecté. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
+  <footer>Vos opérations restent dans ce navigateur. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
 </div>
 
 <script>
-const STORAGE_KEY = "familyBudget_v1";       // cache local (secours uniquement)
-const GDRIVE_CFG_KEY = "familyBudget_gdrive"; // client id + fileId (non sensibles)
-const DRIVE_FILE_NAME = "comptes-famille-data.json";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-
+const STORAGE_KEY = "familyBudget_v1";
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function euro(n){ if(!isFinite(n)) n=0; return n.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €"; }
 
@@ -345,7 +337,7 @@ function defaultState(){
   return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [] };
 }
 
-function loadLocalCache(){
+function loadLocalState(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return defaultState();
@@ -354,218 +346,31 @@ function loadLocalCache(){
     return Object.assign(defaultState(), parsed);
   }catch(e){ return defaultState(); }
 }
-function saveLocalCache(){
+function saveLocal(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
     famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
   })); }catch(e){}
 }
 
-let state = { famTitle: "Comptes de la famille", categories: [], rules: [], transactions: [] };
+let state = loadLocalState();
 
-/* ---------------- Stockage : Google Drive, avec cache local de secours ---------------- */
-let storageMode = "checking"; // "google" | "local"
-let gTokenClient = null, gAccessToken = null, gTokenExpiry = 0;
-let driveFileId = null, driveClientId = null;
+/* ---------------- Sync automatique via Google Apps Script ---------------- */
+const SCRIPT_URL_KEY = "familyBudget_scriptUrl";
+let storageMode = "local"; // "google" | "local"
+let scriptUrl = "";
 let persistTimer = null;
-
-function loadDriveConfig(){
-  try{ return JSON.parse(localStorage.getItem(GDRIVE_CFG_KEY) || "{}"); }catch(e){ return {}; }
-}
-function saveDriveConfig(cfg){
-  try{ localStorage.setItem(GDRIVE_CFG_KEY, JSON.stringify(cfg)); }catch(e){}
-}
-
-function googleLibReady(){
-  return typeof google !== "undefined" && google.accounts && google.accounts.oauth2;
-}
-
-async function initStorage(){
-  state = loadLocalCache(); // affichage immédiat pendant qu'on tente Google
-  famTitleInput.value = state.famTitle;
-  renderAll();
-
-  const cfg = loadDriveConfig();
-  driveClientId = cfg.clientId || "";
-  driveFileId = cfg.fileId || null;
-  document.getElementById("gClientId").value = driveClientId;
-
-  storageMode = "local";
-  showSyncBanner("local");
-
-  if(driveClientId && googleLibReady()){
-    // on a déjà un client id : on tente une reconnexion silencieuse au clic habituel,
-    // mais on ne force pas de popup au chargement (Google l'exigerait de toute façon).
-    document.getElementById("gConnectBtn").textContent = "Se reconnecter à Google";
-  }
-  updateGoogleUi();
-  setTimeout(updateGoogleUi, 1500); // laisse le temps au script Google de charger
-}
-
-function updateGoogleUi(){
-  const box = document.getElementById("gStatus");
-  if(!googleLibReady()){
-    box.textContent = "La connexion Google n'est pas disponible dans ce contexte (ouvrez le fichier hébergé en http/https, pas via ce lien Claude).";
-  }else if(storageMode === "google"){
-    box.textContent = "Connecté à Google Drive.";
-  }else if(driveClientId){
-    box.textContent = "Identifiant Google enregistré. Cliquez sur « Se connecter » pour synchroniser.";
-  }else{
-    box.textContent = "Renseignez votre identifiant Google (Client ID) puis connectez-vous.";
-  }
-}
-
-function saveGClientId(){
-  const input = document.getElementById("gClientId");
-  driveClientId = input.value.trim();
-  saveDriveConfig({ clientId: driveClientId, fileId: driveFileId });
-  updateGoogleUi();
-}
-
-function connectGoogle(){
-  if(!googleLibReady()){
-    alert("La connexion Google n'est disponible que si vous ouvrez ce fichier hébergé en http/https (pas via ce lien Claude publié).");
-    return;
-  }
-  if(!driveClientId){
-    alert("Renseignez d'abord votre identifiant Google (Client ID) ci-dessus.");
-    return;
-  }
-  saveDriveConfig({ clientId: driveClientId, fileId: driveFileId });
-
-  gTokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: driveClientId,
-    scope: DRIVE_SCOPE,
-    callback: async (resp)=>{
-      if(resp.error){ alert("Connexion Google refusée ou annulée."); return; }
-      gAccessToken = resp.access_token;
-      gTokenExpiry = Date.now() + (resp.expires_in||3500)*1000;
-      try{
-        await driveSyncOnConnect();
-        storageMode = "google";
-        showSyncBanner("google");
-        updateGoogleUi();
-        document.getElementById("gConnectBtn").textContent = "Se reconnecter à Google";
-        startAutoRefresh();
-      }catch(e){
-        console.error(e);
-        alert("Connexion réussie mais échec de l'accès à Drive : " + (e.message||e));
-      }
-    }
-  });
-  gTokenClient.requestAccessToken({ prompt: gAccessToken ? "" : "consent" });
-}
-
-function disconnectGoogle(){
-  if(gAccessToken && google.accounts && google.accounts.oauth2){
-    try{ google.accounts.oauth2.revoke(gAccessToken, ()=>{}); }catch(e){}
-  }
-  gAccessToken = null;
-  storageMode = "local";
-  showSyncBanner("local");
-  updateGoogleUi();
-  document.getElementById("gConnectBtn").textContent = "Se connecter à Google";
-  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
-}
-
-async function driveApiFetch(url, options={}){
-  if(!gAccessToken || Date.now() > gTokenExpiry - 5000){
-    throw new Error("Session Google expirée — reconnectez-vous.");
-  }
-  const res = await fetch(url, {
-    ...options,
-    headers: { ...(options.headers||{}), Authorization: "Bearer " + gAccessToken }
-  });
-  if(!res.ok){
-    const text = await res.text().catch(()=> "");
-    throw new Error("Erreur Drive (" + res.status + ") " + text.slice(0,200));
-  }
-  return res;
-}
-
-async function driveFindFile(){
-  const q = encodeURIComponent(`name='${DRIVE_FILE_NAME}' and trashed=false`);
-  const res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&spaces=drive`);
-  const data = await res.json();
-  return (data.files && data.files[0]) || null;
-}
-
-async function driveCreateFile(dataObj){
-  const boundary = "-------fambudget" + uid();
-  const metadata = { name: DRIVE_FILE_NAME, mimeType: "application/json" };
-  const body =
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(dataObj)}\r\n` +
-    `--${boundary}--`;
-  const res = await driveApiFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
-    method: "POST",
-    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-    body
-  });
-  const data = await res.json();
-  return data.id;
-}
-
-async function driveReadFile(fileId){
-  const res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
-  return await res.json();
-}
-
-async function driveWriteFile(fileId, dataObj){
-  await driveApiFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(dataObj)
-  });
-}
-
-async function driveSyncOnConnect(){
-  if(!driveFileId){
-    const existing = await driveFindFile();
-    driveFileId = existing ? existing.id : null;
-  }
-  if(driveFileId){
-    try{
-      const remote = await driveReadFile(driveFileId);
-      state.famTitle = remote.famTitle || state.famTitle;
-      state.categories = remote.categories || state.categories;
-      state.rules = remote.rules || state.rules;
-      state.transactions = remote.transactions || state.transactions;
-    }catch(e){
-      // fichier introuvable/corrompu : on repart d'une création propre
-      driveFileId = null;
-    }
-  }
-  if(!driveFileId){
-    driveFileId = await driveCreateFile({
-      famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
-    });
-  }
-  saveDriveConfig({ clientId: driveClientId, fileId: driveFileId });
-  famTitleInput.value = state.famTitle;
-  renderAll();
-}
-
 let autoRefreshTimer = null;
-function startAutoRefresh(){
-  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(refreshFromDrive, 60000);
-}
-async function refreshFromDrive(){
-  if(storageMode !== "google" || !driveFileId) return;
-  try{
-    const remote = await driveReadFile(driveFileId);
-    state.famTitle = remote.famTitle || state.famTitle;
-    state.categories = remote.categories || state.categories;
-    state.rules = remote.rules || state.rules;
-    state.transactions = remote.transactions || state.transactions;
-    famTitleInput.value = state.famTitle;
-    renderAll();
-    showSyncBanner("google");
-  }catch(e){ console.error(e); showSyncBanner("error"); }
-}
-function manualRefresh(){
-  if(storageMode !== "google"){ alert("Connectez-vous d'abord à Google."); return; }
-  refreshFromDrive();
+
+function initStorage(){
+  famTitleInput.value = state.famTitle;
+  renderAll();
+
+  scriptUrl = localStorage.getItem(SCRIPT_URL_KEY) || "";
+  document.getElementById("scriptUrlInput").value = scriptUrl;
+  if(scriptUrl){
+    refreshFromDrive(true);
+    startAutoRefresh();
+  }
 }
 
 function showSyncBanner(mode){
@@ -573,27 +378,87 @@ function showSyncBanner(mode){
   if(!el) return;
   if(mode === "google"){
     el.className = "sync-banner cloud";
-    el.textContent = "☁️ Synchronisé sur Google Drive — accessible depuis tous vos appareils connectés à ce même compte Google.";
+    el.textContent = "☁️ Synchronisé — les modifications se sauvegardent automatiquement sur votre Google Drive.";
   }else if(mode === "error"){
     el.className = "sync-banner error";
-    el.textContent = "⚠️ Problème de connexion à Google Drive — vos modifications récentes peuvent ne pas être enregistrées. Reconnectez-vous si besoin.";
+    el.textContent = "⚠️ Problème de connexion à votre script Google — vos modifications récentes peuvent ne pas être enregistrées.";
   }else{
     el.className = "sync-banner local";
-    el.textContent = "💻 Non connecté — stockage local à cet appareil/navigateur uniquement. Connectez-vous à Google ci-dessus pour synchroniser.";
+    el.textContent = "💻 Non connecté — stockage local à cet appareil/navigateur uniquement.";
   }
 }
 
-/* Écritures : mettent à jour le cache local `state`, puis programment
-   une synchronisation Google Drive (regroupée, avec un léger délai). */
+function connectDrive(){
+  const url = document.getElementById("scriptUrlInput").value.trim();
+  if(!url){ alert("Collez d'abord le lien de votre script Google (se terminant par /exec)."); return; }
+  scriptUrl = url;
+  localStorage.setItem(SCRIPT_URL_KEY, scriptUrl);
+  refreshFromDrive(true);
+  startAutoRefresh();
+}
+
+function disconnectDrive(){
+  scriptUrl = "";
+  localStorage.removeItem(SCRIPT_URL_KEY);
+  storageMode = "local";
+  showSyncBanner("local");
+  document.getElementById("driveStatus").textContent = "Déconnecté. Vos données restent dans ce navigateur.";
+  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+}
+
+function startAutoRefresh(){
+  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(()=>refreshFromDrive(false), 60000);
+}
+
+async function refreshFromDrive(isInitial){
+  if(!scriptUrl) return;
+  try{
+    const res = await fetch(scriptUrl, { method: "GET" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const remote = await res.json();
+    if(remote && typeof remote === "object"){
+      state.famTitle = remote.famTitle || state.famTitle;
+      state.categories = (remote.categories && remote.categories.length) ? remote.categories : state.categories;
+      state.rules = remote.rules || state.rules;
+      state.transactions = remote.transactions || state.transactions;
+      famTitleInput.value = state.famTitle;
+      saveLocal();
+      renderAll();
+    }
+    storageMode = "google";
+    showSyncBanner("google");
+    document.getElementById("driveStatus").textContent = "Connecté. Dernière synchronisation : " + new Date().toLocaleTimeString("fr-FR");
+  }catch(e){
+    console.error(e);
+    if(isInitial){
+      storageMode = "local";
+      document.getElementById("driveStatus").textContent = "Échec de connexion à ce lien. Vérifiez qu'il est correct et que le déploiement autorise l'accès.";
+    }
+    showSyncBanner("error");
+  }
+}
+function manualRefresh(){
+  if(!scriptUrl){ alert("Connectez-vous d'abord."); return; }
+  refreshFromDrive(false);
+}
+
+/* Écritures : mettent à jour le cache local `state` puis programment
+   une sauvegarde (Google si connecté, sinon juste ce navigateur). */
 function schedulePersist(){
-  saveLocalCache();
-  if(storageMode !== "google" || !driveFileId) return;
+  saveLocal();
+  if(storageMode !== "google" || !scriptUrl) return;
   clearTimeout(persistTimer);
   persistTimer = setTimeout(async ()=>{
     try{
-      await driveWriteFile(driveFileId, {
-        famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+      const res = await fetch(scriptUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // évite le preflight CORS
+        body: JSON.stringify({
+          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions
+        })
       });
+      if(!res.ok) throw new Error("HTTP " + res.status);
       showSyncBanner("google");
     }catch(e){ console.error(e); showSyncBanner("error"); }
   }, 800);
