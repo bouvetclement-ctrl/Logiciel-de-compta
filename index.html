@@ -69,6 +69,10 @@
   section.view.active{ display:block; }
 
   .card{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; margin-bottom:18px; }
+  .tx-sticky-bar{
+    position: sticky; top: 0; z-index: 60;
+    background: var(--surface); padding-top: 18px; padding-bottom: 10px;
+  }
   .card h2{ font-family:var(--font-display); font-size:19px; font-weight:600; margin:0 0 4px; }
   .card .sub{ color:var(--muted); font-size:13px; margin:0 0 16px; }
 
@@ -289,51 +293,52 @@
 
   <!-- ============ TRANSACTIONS ============ -->
   <section class="view" id="view-transactions">
-    <div class="card">
-      <div class="toolbar">
-        <h2 style="margin:0;">Journal des opérations</h2>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn small" id="aiSortBtn" onclick="runAiSort()">✨ Trier avec l'IA les non catégorisées</button>
-          <button class="btn secondary small" onclick="reapplyRules()">📏 Appliquer les règles</button>
-          <button class="btn secondary small" onclick="exportCsv()">⭳ Export CSV</button>
+    <div class="card" style="padding-top:0;">
+      <div class="tx-sticky-bar">
+        <div class="toolbar" style="margin:0 0 10px;">
+          <h2 style="margin:0; font-size:16px;">Journal des opérations</h2>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn secondary small" onclick="reapplyRules()">📏 Appliquer les règles</button>
+            <button class="btn secondary small" onclick="exportCsv()">⭳ Export CSV</button>
+          </div>
         </div>
-      </div>
-      <p class="sub">Le tri par règles (mots-clés) fonctionne sans IA et sans abonnement, y compris hors ligne. Le bouton IA est un coup de pouce optionnel pour les cas ambigus : il utilise simplement votre usage Claude habituel.</p>
-      <div class="grid-form" style="margin-bottom:6px;">
-        <div class="field"><label>Recherche</label><input type="text" id="filterSearch" placeholder="Libellé..." oninput="renderTransactions()"></div>
-        <div class="field"><label>Catégorie</label><select id="filterCategory" onchange="renderTransactions()"></select></div>
-        <div class="field"><label>Mois</label><select id="filterMonth" onchange="renderTransactions()"></select></div>
-        <div class="field"><label>Trier par</label>
-          <select id="sortBy" onchange="renderTransactions()">
-            <option value="date_desc">Date (récent → ancien)</option>
-            <option value="date_asc">Date (ancien → récent)</option>
-            <option value="label_asc">Libellé (A → Z)</option>
-            <option value="label_desc">Libellé (Z → A)</option>
-            <option value="amount_desc">Montant (haut → bas)</option>
-            <option value="amount_asc">Montant (bas → haut)</option>
-          </select>
+        <div class="grid-form" style="margin-bottom:6px;">
+          <div class="field">
+            <label>Recherche</label>
+            <div style="position:relative;">
+              <input type="text" id="filterSearch" placeholder="Libellé..." oninput="renderTransactions()" style="padding-right:28px;">
+              <button type="button" onclick="clearSearchFilter()" title="Effacer la recherche"
+                      style="position:absolute; right:4px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:16px; cursor:pointer; padding:2px 6px; line-height:1;">✕</button>
+            </div>
+          </div>
+          <div class="field"><label>Catégorie</label><select id="filterCategory" onchange="renderTransactions()"></select></div>
+          <div class="field"><label>Mois</label><select id="filterMonth" onchange="renderTransactions()"></select></div>
+          <div class="field"><label>Trier par</label>
+            <select id="sortBy" onchange="renderTransactions()">
+              <option value="date_desc">Date (récent → ancien)</option>
+              <option value="date_asc">Date (ancien → récent)</option>
+              <option value="label_asc">Libellé (A → Z)</option>
+              <option value="label_desc">Libellé (Z → A)</option>
+              <option value="amount_desc">Montant (haut → bas)</option>
+              <option value="amount_asc">Montant (bas → haut)</option>
+            </select>
+          </div>
         </div>
-      </div>
-      <label class="chk on" style="display:inline-flex; margin-bottom:12px;">
-        <input type="checkbox" id="groupByMonth" onchange="renderTransactions()" style="width:auto;"> Regrouper par mois
-      </label>
-      <p class="hint" id="aiHint" style="display:none;"></p>
-      <div id="aiRulesReview" class="card" style="display:none; margin:0 0 16px; padding:14px 16px; background:var(--surface-2);">
-        <h2 style="font-size:15px; margin-bottom:8px;">Règles proposées par l'IA</h2>
-        <p class="sub" style="margin-bottom:10px;">Ces règles s'appliqueront automatiquement aux futurs imports. Décochez celles que vous ne voulez pas garder.</p>
-        <div id="aiRulesList"></div>
-        <div style="display:flex; gap:8px; margin-top:6px;">
-          <button class="btn small" onclick="confirmAiRules()">Ajouter les règles cochées</button>
-          <button class="btn secondary small" onclick="dismissAiRules()">Ignorer</button>
+        <div style="display:flex; flex-wrap:wrap; gap:6px 16px; margin-bottom:8px;">
+          <label class="chk on" style="display:inline-flex;">
+            <input type="checkbox" id="groupByMonth" onchange="renderTransactions()" style="width:auto;"> Regrouper par mois
+          </label>
+          <label class="chk on" style="display:inline-flex;">
+            <input type="checkbox" id="onlyUncategorized" onchange="renderTransactions()" style="width:auto;"> Non catégorisées uniquement
+          </label>
         </div>
-      </div>
-
-      <div id="bulkBar" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:10px 12px; margin-bottom:12px;">
-        <strong id="bulkCount" style="font-size:13px;"></strong>
-        <input type="text" id="bulkCategorySelect" list="categoryDatalist" placeholder="Tapez pour rechercher…" style="max-width:220px;">
-        <button class="btn small" onclick="bulkAssignCategory()">Assigner la catégorie</button>
-        <button class="btn secondary small" onclick="bulkDeleteSelection()">Supprimer la sélection</button>
-        <button class="btn secondary small" onclick="clearSelection()">Annuler la sélection</button>
+        <div id="bulkBar" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:8px 10px; margin-bottom:10px;">
+          <strong id="bulkCount" style="font-size:13px;"></strong>
+          <input type="text" id="bulkCategorySelect" list="categoryDatalist" placeholder="Tapez pour rechercher…" style="max-width:220px;">
+          <button class="btn small" onclick="bulkAssignCategory()">Assigner la catégorie</button>
+          <button class="btn secondary small" onclick="bulkDeleteSelection()">Supprimer la sélection</button>
+          <button class="btn secondary small" onclick="clearSelection()">Annuler la sélection</button>
+        </div>
       </div>
 
       <div class="table-scroll">
@@ -380,15 +385,14 @@
         <h2 style="margin:0;">Catégories</h2>
         <button class="btn secondary small" style="color:var(--terracotta); border-color:var(--terracotta);" onclick="resetCategoriesData()">🗑️ Réinitialiser les catégories</button>
       </div>
-      <p class="sub">La liste des postes utilisés pour classer les opérations.</p>
+      <p class="sub">La liste des postes utilisés pour classer les opérations. Une même catégorie peut recevoir des dépenses et des remboursements — ils s'équilibrent automatiquement (pas besoin de distinguer dépense/revenu).</p>
       <div class="grid-form">
         <div class="field"><label>Catégorie principale (optionnel)</label><input type="text" id="newCatGroup" placeholder="Ex : Logement"></div>
         <div class="field"><label>Sous-catégorie</label><input type="text" id="newCatName" placeholder="Ex : Electricité"></div>
-        <div class="field"><label>Type</label><select id="newCatType"><option value="depense">Dépense</option><option value="revenu">Revenu</option></select></div>
         <div class="field" style="align-self:end;"><button class="btn" onclick="addCategory()">Ajouter</button></div>
       </div>
       <table>
-        <thead><tr><th>Catégorie principale</th><th>Sous-catégorie</th><th>Type</th><th></th></tr></thead>
+        <thead><tr><th>Catégorie principale</th><th>Sous-catégorie</th><th></th></tr></thead>
         <tbody id="catTable"></tbody>
       </table>
     </div>
@@ -441,16 +445,35 @@
           <label>Montant cible (€)</label>
           <input type="number" min="0" step="1" id="budgetAmount" placeholder="0">
         </div>
+      </div>
+      <div class="grid-form" style="margin-top:-6px;">
+        <div class="field">
+          <label>Suggérer un montant depuis l'historique (optionnel)</label>
+          <select id="budgetLookback">
+            <option value="">— Saisie manuelle —</option>
+            <option value="1">Sur le dernier mois</option>
+            <option value="3">Sur les 3 derniers mois</option>
+            <option value="6">Sur les 6 derniers mois</option>
+            <option value="10">Sur les 10 derniers mois</option>
+            <option value="12">Sur la dernière année</option>
+          </select>
+        </div>
+        <div class="field" style="align-self:end;"><button class="btn secondary" onclick="suggestBudgetAmount()">🧮 Calculer une suggestion</button></div>
         <div class="field" id="budgetSmoothField" style="display:none; align-self:end;">
           <label class="chk on" style="display:inline-flex;">
             <input type="checkbox" id="budgetSmoothInput" style="width:auto;"> Lisser sur l'année
           </label>
         </div>
+        <div class="field" style="align-self:end;">
+          <label class="chk" style="display:inline-flex;">
+            <input type="checkbox" id="budgetProvisionInput" style="width:auto;"> C'est une provision (réserve pour une dépense future identifiée ou imprévue)
+          </label>
+        </div>
         <div class="field" style="align-self:end;"><button class="btn" onclick="addBudget()">Ajouter</button></div>
       </div>
-      <p class="hint" style="margin-top:-8px;">« Lisser sur l'année » compare vos dépenses au rythme attendu à date (montant annuel ÷ 12 × mois écoulés) plutôt qu'au total annuel complet — utile pour savoir si vous êtes dans les temps en cours d'année.</p>
+      <p class="hint" style="margin-top:-8px;">La suggestion calcule votre dépense moyenne passée sur la période choisie pour cette portée et pré-remplit le montant — à vous de valider ou d'ajuster avant d'ajouter. « Lisser sur l'année » compare vos dépenses au rythme attendu à date plutôt qu'au total annuel complet. Une « provision » n'est pas un plafond à ne pas dépasser : c'est un objectif de réserve, pour une dépense ponctuelle prévue (vacances, impôts...) ou un imprévu.</p>
       <table>
-        <thead><tr><th>Portée</th><th>Période</th><th class="num">Montant</th><th>Lissage</th><th></th></tr></thead>
+        <thead><tr><th>Portée</th><th>Type</th><th>Période</th><th class="num">Montant</th><th>Lissage</th><th></th><th></th></tr></thead>
         <tbody id="budgetDefTable"></tbody>
       </table>
       <div id="budgetDefEmpty" class="empty">Aucun budget défini pour le moment.</div>
@@ -536,6 +559,7 @@
     <div class="modal-box">
       <h2 id="modalTitle"></h2>
       <p class="sub" id="modalMessage"></p>
+      <div id="modalBodyHtml" class="sub" style="display:none;"></div>
       <div id="modalFields"></div>
       <p class="modal-error" id="modalError"></p>
       <div class="modal-actions">
@@ -545,7 +569,7 @@
     </div>
   </div>
 
-  <footer>Vos opérations restent dans ce navigateur. Seuls le libellé et le montant peuvent être envoyés à l'IA pour suggérer une catégorie, jamais de numéro de compte.</footer>
+  <footer>Vos opérations restent dans ce navigateur (ou sur votre Google Drive si connecté). Aucune donnée n'est envoyée ailleurs.</footer>
 </div>
 
 <script>
@@ -557,10 +581,14 @@ function uid(){ return Math.random().toString(36).slice(2,10); }
    dans certains cadres sécurisés (ex. le lien Claude publié). */
 let modalState = null;
 
-function openModal({ title="", message="", fields=[], confirmLabel="OK", cancelLabel="Annuler", danger=false, hideCancel=false, onConfirm }){
+function openModal({ title="", message="", html="", fields=[], confirmLabel="OK", cancelLabel="Annuler", danger=false, hideCancel=false, onConfirm }){
   document.getElementById("modalTitle").textContent = title;
   document.getElementById("modalTitle").style.display = title ? "block" : "none";
   document.getElementById("modalMessage").textContent = message;
+  document.getElementById("modalMessage").style.display = message ? "block" : "none";
+  const bodyHtmlEl = document.getElementById("modalBodyHtml");
+  bodyHtmlEl.innerHTML = html;
+  bodyHtmlEl.style.display = html ? "block" : "none";
   const fieldsBox = document.getElementById("modalFields");
   fieldsBox.innerHTML = fields.map(f=>`
     <div class="modal-field">
@@ -624,15 +652,15 @@ function euro(n){ if(!isFinite(n)) n=0; return n.toLocaleString("fr-FR",{minimum
 
 function defaultCategories(){
   return [
-    { id: uid(), name: "Alimentation", type: "depense" },
-    { id: uid(), name: "Logement", type: "depense" },
-    { id: uid(), name: "Transport", type: "depense" },
-    { id: uid(), name: "Santé", type: "depense" },
-    { id: uid(), name: "Abonnements", type: "depense" },
-    { id: uid(), name: "Loisirs", type: "depense" },
-    { id: uid(), name: "Salaire", type: "revenu" },
-    { id: uid(), name: "Autres revenus", type: "revenu" },
-    { id: uid(), name: "Divers", type: "depense" },
+    { id: uid(), name: "Alimentation" },
+    { id: uid(), name: "Logement" },
+    { id: uid(), name: "Transport" },
+    { id: uid(), name: "Santé" },
+    { id: uid(), name: "Abonnements" },
+    { id: uid(), name: "Loisirs" },
+    { id: uid(), name: "Salaire" },
+    { id: uid(), name: "Autres revenus" },
+    { id: uid(), name: "Divers" },
   ];
 }
 function defaultDashboardConfig(){
@@ -826,11 +854,10 @@ famTitleInput.addEventListener("change", ()=>{ state.famTitle = famTitleInput.va
 function addCategory(){
   const groupInput = document.getElementById("newCatGroup");
   const nameInput = document.getElementById("newCatName");
-  const typeInput = document.getElementById("newCatType");
   const name = nameInput.value.trim();
   if(!name) return;
   const group = groupInput.value.trim();
-  state.categories.push({ id: uid(), name, group, type: typeInput.value });
+  state.categories.push({ id: uid(), name, group });
   nameInput.value = "";
   groupInput.value = "";
   persistConfig();
@@ -872,7 +899,6 @@ function renderCategories(){
             onchange="updateCategoryField('${cat.id}','group',this.value)"></td>
       <td><input type="text" value="${cat.name}" style="width:170px;"
             onchange="updateCategoryField('${cat.id}','name',this.value)"></td>
-      <td>${cat.type==='revenu'?'Revenu':'Dépense'}</td>
       <td><button class="icon-btn" onclick="removeCategory('${cat.id}')">✕</button></td>`;
     tbody.appendChild(tr);
   });
@@ -994,31 +1020,59 @@ function budgetScopeLabel(scope){
   return cat ? categoryLabel(cat) : "(catégorie supprimée)";
 }
 
-function addBudget(){
-  const type = document.getElementById("budgetScopeType").value;
+function resolveScopeFromForm(){
+  const scopeType = document.getElementById("budgetScopeType").value;
   const searchVal = document.getElementById("budgetScopeSearch").value.trim();
+  if(!searchVal){ appAlert("Choisissez une catégorie principale ou une sous-catégorie."); return null; }
+  if(scopeType === "group"){
+    if(!uniqueScopeGroups().includes(searchVal)){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return null; }
+    return { type:"group", value: searchVal };
+  }
+  const cat = findCategoryByLabel(searchVal);
+  if(!cat){ appAlert("Sous-catégorie inconnue : « " + searchVal + " »."); return null; }
+  return { type:"category", value: cat.id };
+}
+
+function computeSuggestedAmount(scope, period, lookbackMonths){
+  const today = new Date();
+  const from = new Date(today);
+  from.setMonth(from.getMonth() - lookbackMonths);
+  const fromStr = from.toISOString().slice(0,10);
+  const todayStr = today.toISOString().slice(0,10);
+  const spent = netSpend(getScopedTransactions()
+    .filter(t=> t.date>=fromStr && t.date<=todayStr && txMatchesScope(t,scope)));
+  const monthlyAvg = spent / lookbackMonths;
+  return { total: spent, monthlyAvg, suggested: period==="annual" ? monthlyAvg*12 : monthlyAvg };
+}
+
+function suggestBudgetAmount(){
+  const scope = resolveScopeFromForm();
+  if(!scope) return;
+  const lookback = parseInt(document.getElementById("budgetLookback").value, 10);
+  if(!lookback){ appAlert("Choisissez d'abord une période d'historique à utiliser pour le calcul."); return; }
+  const period = document.getElementById("budgetPeriod").value;
+  const { monthlyAvg, suggested } = computeSuggestedAmount(scope, period, lookback);
+  document.getElementById("budgetAmount").value = Math.round(suggested);
+  appAlert(`Sur les ${lookback} dernier(s) mois, la dépense moyenne pour « ${budgetScopeLabel(scope)} » est de ${euro(monthlyAvg)}/mois.\nMontant suggéré (${period==='annual'?'annuel':'mensuel'}) : ${euro(suggested)}. Ajustez si besoin, puis cliquez « Ajouter ».`);
+}
+
+function addBudget(){
+  const scope = resolveScopeFromForm();
+  if(!scope) return;
   const period = document.getElementById("budgetPeriod").value;
   const amount = parseFrenchNumber(document.getElementById("budgetAmount").value);
   const smooth = period === "annual" && document.getElementById("budgetSmoothInput").checked;
-  if(!searchVal){ appAlert("Choisissez une catégorie principale ou une sous-catégorie."); return; }
+  const kind = document.getElementById("budgetProvisionInput").checked ? "provision" : "depense";
   if(isNaN(amount) || amount <= 0){ appAlert("Indiquez un montant cible valide."); return; }
-
-  let scope;
-  if(type === "group"){
-    if(!uniqueScopeGroups().includes(searchVal)){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return; }
-    scope = { type:"group", value: searchVal };
-  }else{
-    const cat = findCategoryByLabel(searchVal);
-    if(!cat){ appAlert("Sous-catégorie inconnue : « " + searchVal + " »."); return; }
-    scope = { type:"category", value: cat.id };
-  }
 
   // Remplace un budget existant de même portée + même période plutôt que d'en créer un doublon.
   state.budgets = state.budgets.filter(b=> !(b.scope.type===scope.type && b.scope.value===scope.value && b.period===period));
-  state.budgets.push({ id: uid(), scope, period, amount, smooth });
+  state.budgets.push({ id: uid(), scope, period, amount, smooth, kind });
   document.getElementById("budgetScopeSearch").value = "";
   document.getElementById("budgetAmount").value = "";
   document.getElementById("budgetSmoothInput").checked = false;
+  document.getElementById("budgetProvisionInput").checked = false;
+  document.getElementById("budgetLookback").value = "";
   persistConfig();
   renderBudgets();
 }
@@ -1045,6 +1099,13 @@ function updateBudgetSmooth(id, checked){
   persistConfig();
   renderBudgetTracking();
 }
+function updateBudgetKind(id, checked){
+  const b = state.budgets.find(x=>x.id===id);
+  if(!b) return;
+  b.kind = checked ? "provision" : "depense";
+  persistConfig();
+  renderBudgetTracking();
+}
 
 function renderBudgetDefinitions(){
   const tbody = document.getElementById("budgetDefTable");
@@ -1052,10 +1113,14 @@ function renderBudgetDefinitions(){
   tbody.innerHTML = sorted.map(b=>`
     <tr>
       <td>${budgetScopeLabel(b.scope)}</td>
+      <td><label class="chk ${b.kind==='provision'?'on':''}" style="font-size:12px; display:inline-flex;">
+            <input type="checkbox" ${b.kind==='provision'?'checked':''} onchange="updateBudgetKind('${b.id}', this.checked)" style="width:auto;"> Provision
+          </label></td>
       <td>${b.period === "monthly" ? "Mensuel" : "Annuel"}</td>
       <td class="num"><input type="number" min="0" step="1" value="${b.amount}" style="width:90px; text-align:right;"
             onchange="updateBudgetAmount('${b.id}', this.value)"></td>
       <td>${b.period==="annual" ? `<label class="chk ${b.smooth?"on":""}" style="font-size:12px; display:inline-flex;"><input type="checkbox" ${b.smooth?"checked":""} onchange="updateBudgetSmooth('${b.id}', this.checked)" style="width:auto;"> Lisser</label>` : "—"}</td>
+      <td><button class="btn secondary small" onclick="showBudgetBilan('${b.id}')">📊 Bilan</button></td>
       <td><button class="icon-btn" onclick="removeBudget('${b.id}')">✕</button></td>
     </tr>`).join("");
   document.getElementById("budgetDefEmpty").style.display = sorted.length ? "none" : "block";
@@ -1066,6 +1131,14 @@ function txMatchesScope(t, scope){
   if(!cat) return false;
   if(scope.type === "group") return (cat.group || cat.name) === scope.value;
   return cat.id === scope.value;
+}
+
+/* Dépense nette d'un ensemble d'opérations : les remboursements/retours (montants positifs)
+   se soustraient aux dépenses de la même catégorie plutôt que d'être ignorés. Jamais négatif
+   (un net positif — plus de remboursements que de dépenses — compte comme 0 dépensé). */
+function netSpend(rows){
+  const net = rows.reduce((s,t)=>s+t.amount,0);
+  return Math.max(-net, 0);
 }
 
 /* Fraction de l'année déjà écoulée (1 pour une année révolue, 0 pour une année future). */
@@ -1079,15 +1152,17 @@ function yearProgressFraction(year){
   return Math.min(Math.max(elapsed / ((end-start)/86400000), 0), 1);
 }
 
-function renderBudgetProgressRow(label, targetAmount, spent, hint){
+function renderBudgetProgressRow(label, targetAmount, spent, hint, isProvision){
   const pct = targetAmount > 0 ? Math.min((spent/targetAmount)*100, 100) : (spent>0?100:0);
   const over = spent > targetAmount;
+  const overLabel = isProvision ? " · objectif atteint" : " · dépassement";
+  const barClass = (over && !isProvision) ? "exp" : "";
   return `<div class="cat-row">
     <div class="top">
       <span class="name">${label}</span>
-      <span class="figures">${euro(spent)} / ${euro(targetAmount)}${over ? " · dépassement" : ""}</span>
+      <span class="figures">${euro(spent)} / ${euro(targetAmount)}${over ? overLabel : ""}</span>
     </div>
-    <div class="bar-track"><div class="bar-fill ${over?"exp":""}" style="width:${pct}%"></div></div>
+    <div class="bar-track"><div class="bar-fill ${barClass}" style="width:${pct}%"></div></div>
     ${hint ? `<div class="hint" style="margin-top:4px;">${hint}</div>` : ""}
   </div>`;
 }
@@ -1103,23 +1178,21 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
 
   let monthlyTargetSum = 0, monthlySpentSum = 0;
   const monthlyHTML = monthlyBudgets.map(b=>{
-    const spent = txs
-      .filter(t=> monthKey(t.date)===selMonth && t.amount<0 && txMatchesScope(t,b.scope))
-      .reduce((s,t)=>s+Math.abs(t.amount),0);
+    const spent = netSpend(txs.filter(t=> monthKey(t.date)===selMonth && txMatchesScope(t,b.scope)));
     monthlyTargetSum += b.amount; monthlySpentSum += spent;
-    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (mensuel)", b.amount, spent);
+    const isProv = b.kind === "provision";
+    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (mensuel" + (isProv?", provision":"") + ")", b.amount, spent, null, isProv);
   }).join("");
 
   let annualTargetSum = 0, annualSpentSum = 0;
   const annualHTML = annualBudgets.map(b=>{
-    const spent = txs
-      .filter(t=> (t.date||"").slice(0,4)===selYear && t.amount<0 && txMatchesScope(t,b.scope))
-      .reduce((s,t)=>s+Math.abs(t.amount),0);
+    const spent = netSpend(txs.filter(t=> (t.date||"").slice(0,4)===selYear && txMatchesScope(t,b.scope)));
     const fraction = b.smooth ? yearProgressFraction(selYear) : 1;
     const target = b.amount * fraction;
     annualTargetSum += target; annualSpentSum += spent;
-    const hint = b.smooth ? `rythme attendu à date sur un objectif annuel de ${euro(b.amount)}` : "objectif annuel";
-    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (annuel" + (b.smooth?", lissé":"") + ")", target, spent, hint);
+    const isProv = b.kind === "provision";
+    const hint = b.smooth ? `rythme attendu à date sur un objectif annuel de ${euro(b.amount)}` : (isProv ? "objectif de réserve annuel" : "objectif annuel");
+    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (annuel" + (isProv?", provision":"") + (b.smooth?", lissé":"") + ")", target, spent, hint, isProv);
   }).join("");
 
   let summaryHTML = "";
@@ -1145,6 +1218,82 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
     hasAny: monthlyBudgets.length + annualBudgets.length > 0,
     monthlyTargetSum, monthlySpentSum, annualTargetSum, annualSpentSum
   };
+}
+
+/* ---- Bilan individuel d'un budget, avec recommandation d'ajustement ---- */
+function computeBudgetBilan(b){
+  const scoped = getScopedTransactions();
+  const today = new Date();
+  const isProv = b.kind === "provision";
+
+  if(b.period === "monthly"){
+    const months = [1,2,3].map(i=>{
+      const d = new Date(today.getFullYear(), today.getMonth()-i, 1);
+      return d.toISOString().slice(0,7);
+    });
+    const monthlySpends = months.map(m=> netSpend(scoped
+      .filter(t=>monthKey(t.date)===m && txMatchesScope(t,b.scope))));
+    const avg = monthlySpends.reduce((a,c)=>a+c,0) / months.length;
+    const diffPct = b.amount > 0 ? ((avg-b.amount)/b.amount)*100 : 0;
+    let reco;
+    if(isProv){
+      reco = `Moyenne mise de côté ces 3 derniers mois pour cette provision : ${euro(avg)}/mois, pour un objectif de ${euro(b.amount)}/mois.`;
+    }else if(diffPct > 15){
+      reco = `Vos dépenses moyennes des 3 derniers mois (${euro(avg)}/mois) dépassent ce budget d'environ ${Math.round(diffPct)}%. Une augmentation autour de ${euro(avg)} semble plus réaliste.`;
+    }else if(diffPct < -20){
+      reco = `Vos dépenses moyennes des 3 derniers mois (${euro(avg)}/mois) sont nettement en dessous de ce budget. Vous pourriez le réduire à environ ${euro(avg)} pour libérer de la marge ailleurs.`;
+    }else{
+      reco = `Ce budget semble bien calibré : moyenne récente de ${euro(avg)}/mois pour un objectif de ${euro(b.amount)}.`;
+    }
+    return { avg, reco };
+  }else{
+    const lastYear = String(today.getFullYear()-1);
+    const spentLastYear = netSpend(scoped
+      .filter(t=>(t.date||"").slice(0,4)===lastYear && txMatchesScope(t,b.scope)));
+    const diffPct = b.amount > 0 ? ((spentLastYear-b.amount)/b.amount)*100 : 0;
+    let reco;
+    if(isProv){
+      reco = spentLastYear>0
+        ? `Provisionné en ${lastYear} : ${euro(spentLastYear)}, pour un objectif de ${euro(b.amount)}.`
+        : `Pas encore d'historique complet en ${lastYear} pour cette provision.`;
+    }else if(spentLastYear === 0){
+      reco = `Pas encore assez d'historique annuel (${lastYear}) pour évaluer ce budget.`;
+    }else if(diffPct > 15){
+      reco = `En ${lastYear}, la dépense réelle était de ${euro(spentLastYear)}, soit environ ${Math.round(diffPct)}% de plus que ce budget. Une augmentation vers ${euro(spentLastYear)} semble plus réaliste.`;
+    }else if(diffPct < -20){
+      reco = `En ${lastYear}, la dépense réelle (${euro(spentLastYear)}) était nettement sous ce budget. Vous pourriez le réduire.`;
+    }else{
+      reco = `Ce budget annuel semble cohérent avec la dépense réelle de ${lastYear} (${euro(spentLastYear)}).`;
+    }
+    return { avg: spentLastYear, reco };
+  }
+}
+
+function showBudgetBilan(id){
+  const b = state.budgets.find(x=>x.id===id);
+  if(!b) return;
+  const result = computeBudgetBilan(b);
+  const html = `
+    <div style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border);">
+      <strong>${budgetScopeLabel(b.scope)}</strong> — ${b.period==='monthly'?'mensuel':'annuel'}${b.kind==='provision'?' · provision':''}<br>
+      Budget actuel : ${euro(b.amount)}${b.period==='annual' && b.smooth ? ' (lissé)' : ''}
+    </div>
+    <p style="margin:0;">${result.reco}</p>`;
+  openModal({
+    title: "Bilan du budget",
+    html,
+    confirmLabel: "Appliquer " + euro(Math.round(result.avg)),
+    cancelLabel: "Fermer",
+    onConfirm: ()=>{
+      if(result.avg > 0){
+        b.amount = Math.round(result.avg);
+        persistConfig();
+        renderBudgetDefinitions();
+        renderBudgetTracking();
+      }
+      return true;
+    }
+  });
 }
 
 function renderBudgetTracking(){
@@ -1224,8 +1373,8 @@ function exportBudgetPdf(){
   if(monthlyBudgets.length){
     sectionTitle(`Budgets mensuels — ${selMonth}`);
     monthlyBudgets.forEach(b=>{
-      const spent = scoped.filter(t=>monthKey(t.date)===selMonth && t.amount<0 && txMatchesScope(t,b.scope)).reduce((s,t)=>s+Math.abs(t.amount),0);
-      row(budgetScopeLabel(b.scope), b.amount, spent, false);
+      const spent = netSpend(scoped.filter(t=>monthKey(t.date)===selMonth && txMatchesScope(t,b.scope)));
+      row(budgetScopeLabel(b.scope) + (b.kind==="provision"?" (provision)":""), b.amount, spent, false);
     });
     y += 1; doc.setDrawColor(220); doc.line(14,y,196,y); y+=5;
     row("TOTAL", monthlyTargetSum, monthlySpentSum, true);
@@ -1235,9 +1384,9 @@ function exportBudgetPdf(){
   if(annualBudgets.length){
     sectionTitle(`Budgets annuels — ${selYear}`);
     annualBudgets.forEach(b=>{
-      const spent = scoped.filter(t=>(t.date||"").slice(0,4)===selYear && t.amount<0 && txMatchesScope(t,b.scope)).reduce((s,t)=>s+Math.abs(t.amount),0);
+      const spent = netSpend(scoped.filter(t=>(t.date||"").slice(0,4)===selYear && txMatchesScope(t,b.scope)));
       const fraction = b.smooth ? yearProgressFraction(selYear) : 1;
-      row(budgetScopeLabel(b.scope) + (b.smooth?" (lissé)":""), b.amount*fraction, spent, false);
+      row(budgetScopeLabel(b.scope) + (b.kind==="provision"?" (provision)":"") + (b.smooth?" (lissé)":""), b.amount*fraction, spent, false);
     });
     y += 1; doc.setDrawColor(220); doc.line(14,y,196,y); y+=5;
     row("TOTAL", annualTargetSum, annualSpentSum, true);
@@ -1585,7 +1734,7 @@ function findOrCreateCategory(rawValue, amount){
   const key = (group+"|"+name).toLowerCase();
   let cat = state.categories.find(c => ((c.group||"")+"|"+c.name).toLowerCase() === key);
   if(!cat){
-    cat = { id: uid(), name, group, type: amount >= 0 ? "revenu" : "depense" };
+    cat = { id: uid(), name, group };
     state.categories.push(cat);
   }
   return cat.id;
@@ -1817,6 +1966,13 @@ function removeTx(id){
 
 let selectedIds = new Set();
 
+function clearSearchFilter(){
+  const input = document.getElementById("filterSearch");
+  input.value = "";
+  renderTransactions();
+  input.focus();
+}
+
 function sortRows(rows, sortBy){
   const arr = [...rows];
   switch(sortBy){
@@ -1838,10 +1994,12 @@ function renderTransactions(){
   const monthFilter = document.getElementById("filterMonth").value;
   const sortBy = document.getElementById("sortBy").value;
   const groupByMonth = document.getElementById("groupByMonth").checked;
+  const onlyUncategorized = document.getElementById("onlyUncategorized").checked;
 
   let rows = getScopedTransactions();
   if(search) rows = rows.filter(t=>t.label.toLowerCase().includes(search));
-  if(catFilter === "__none__") rows = rows.filter(t=>!t.categoryId);
+  if(onlyUncategorized) rows = rows.filter(t=>!t.categoryId);
+  else if(catFilter === "__none__") rows = rows.filter(t=>!t.categoryId);
   else if(catFilter) rows = rows.filter(t=>t.categoryId === catFilter);
   if(monthFilter) rows = rows.filter(t=>monthKey(t.date) === monthFilter);
   rows = sortRows(rows, groupByMonth ? "date_desc" : sortBy);
@@ -1897,8 +2055,6 @@ function renderTransactions(){
   document.getElementById("txEmpty").style.display = rows.length ? "none" : "block";
   document.getElementById("selectAllChk").checked = rows.length > 0 && selectedIds.size === rows.length;
 
-  const uncatCount = getScopedTransactions().filter(t=>!t.categoryId).length;
-  document.getElementById("aiSortBtn").disabled = uncatCount === 0;
   renderBulkBar();
   renderKpis();
 }
@@ -2010,140 +2166,6 @@ function editOpeningBalance(){
   });
 }
 
-/* ---------------- Tri IA ---------------- */
-let sampleCap = null;
-(async ()=>{
-  try{
-    if(window.claude && window.claude.use){
-      sampleCap = await window.claude.use("sample");
-    }
-  }catch(e){ sampleCap = null; }
-  updateAiAvailability();
-})();
-
-const ARTIFACT_URL = "https://claude.ai/artifact/Vk1LQzsmn8knYDhC71VdZJ";
-
-function updateAiAvailability(){
-  const hint = document.getElementById("aiHint");
-  if(!sampleCap){
-    hint.style.display = "block";
-    hint.innerHTML = "Le tri par IA n'est disponible que lorsque cet outil est ouvert via son lien Claude publié. " +
-      `<a href="${ARTIFACT_URL}" target="_blank" rel="noopener" style="color:var(--green); font-weight:600;">Ouvrir l'outil en ligne pour trier avec l'IA →</a>`;
-    document.getElementById("aiSortBtn").title = "Indisponible hors du lien Claude";
-  }else{
-    hint.style.display = "none";
-  }
-}
-
-async function runAiSort(){
-  if(!sampleCap){
-    appConfirm(
-      "Le tri par IA n'est disponible que via le lien Claude publié. Ouvrir cet outil en ligne dans un nouvel onglet ?",
-      ()=>{ window.open(ARTIFACT_URL, "_blank", "noopener"); },
-      { confirmLabel: "Ouvrir" }
-    );
-    return;
-  }
-  const uncategorized = getScopedTransactions().filter(t=>!t.categoryId).slice(0, 40);
-  if(uncategorized.length === 0){ appAlert("Tout est déjà catégorisé !"); return; }
-  const btn = document.getElementById("aiSortBtn");
-  btn.disabled = true;
-  const originalText = btn.textContent;
-  btn.textContent = "Analyse en cours...";
-
-  const catList = state.categories.map(c=>`${c.id}: ${c.name} (${c.type})`).join("\n");
-  const txList = uncategorized.map((t,i)=>`${i}. "${t.label}" — ${t.amount.toFixed(2)} €`).join("\n");
-  const genericWords = ["CARTE","PRLV","VIR","VIREMENT","PAIEMENT","ACHAT","CB"];
-
-  const prompt = `Tu classes des opérations bancaires d'une famille française dans des catégories existantes.
-Catégories disponibles (id: nom (type)) :
-${catList}
-
-Opérations à classer (index. libellé — montant ; montant négatif = dépense, positif = revenu) :
-${txList}
-
-Pour chaque opération, choisis l'id de catégorie le plus pertinent (n'invente pas d'id). Quand le libellé contient un nom d'enseigne ou de service clairement identifiable (pas un mot générique bancaire comme CARTE, PRLV, VIR, VIREMENT, PAIEMENT), propose aussi un "keyword" : un extrait court et distinctif du libellé (le nom du commerçant/service, tel qu'il apparaît dans le libellé) qui permettrait de reconnaître automatiquement des opérations similaires à l'avenir. Laisse "keyword" vide si le libellé est trop générique ou ponctuel pour servir de règle.
-
-Réponds UNIQUEMENT avec un objet JSON de la forme {"assignments":[{"index":0,"categoryId":"...","keyword":"..."}]}, un élément par opération.`;
-
-  try{
-    const result = await sampleCap.json(prompt, { modelTier: "quick" });
-    const assignments = (result && result.assignments) || [];
-    const validIds = new Set(state.categories.map(c=>c.id));
-    const existingKeywords = new Set(state.rules.map(r=>r.keyword.toUpperCase()));
-    let applied = 0;
-    const changed = [];
-    const ruleCandidates = [];
-    const seenKeywords = new Set();
-    assignments.forEach(a=>{
-      const tx = uncategorized[a.index];
-      if(tx && validIds.has(a.categoryId)){
-        tx.categoryId = a.categoryId;
-        tx.source = "ai";
-        changed.push(tx);
-        applied++;
-
-        const kw = (a.keyword||"").trim();
-        const kwUpper = kw.toUpperCase();
-        if(kw.length >= 3
-           && !genericWords.includes(kwUpper)
-           && tx.label.toUpperCase().includes(kwUpper)
-           && !existingKeywords.has(kwUpper)
-           && !seenKeywords.has(kwUpper)){
-          seenKeywords.add(kwUpper);
-          ruleCandidates.push({ keyword: kw, categoryId: a.categoryId, sampleLabel: tx.label });
-        }
-      }
-    });
-    persistTxBulk(changed);
-    renderAll();
-    if(ruleCandidates.length){
-      showAiRulesReview(ruleCandidates);
-      appAlert(applied + " opération(s) classée(s) par l'IA. " + ruleCandidates.length + " règle(s) proposée(s) — à valider ci-dessous pour les prochains imports.");
-    }else{
-      appAlert(applied + " opération(s) classée(s) par l'IA. Vérifiez et ajustez si besoin.");
-    }
-  }catch(err){
-    appAlert("Le tri par IA a échoué (" + (err && err.code || "erreur") + "). Réessayez plus tard.");
-  }finally{
-    btn.disabled = false;
-    btn.textContent = originalText;
-    renderTransactions();
-  }
-}
-
-let pendingAiRules = [];
-function showAiRulesReview(candidates){
-  pendingAiRules = candidates;
-  const box = document.getElementById("aiRulesReview");
-  const list = document.getElementById("aiRulesList");
-  list.innerHTML = candidates.map((c,i)=>`
-    <label class="chk on" style="display:flex; align-items:center; gap:8px; padding:8px 10px; margin-bottom:6px; border-radius:4px; background:var(--surface-2);">
-      <input type="checkbox" data-idx="${i}" checked style="width:auto;">
-      <span><strong>${c.keyword}</strong> → ${catName(c.categoryId)}</span>
-      <span class="hint" style="margin:0 0 0 auto;">ex. « ${c.sampleLabel.slice(0,40)} »</span>
-    </label>`).join("");
-  box.style.display = "block";
-}
-function confirmAiRules(){
-  const checks = document.querySelectorAll("#aiRulesList input[type=checkbox]");
-  let added = 0;
-  checks.forEach(chk=>{
-    if(chk.checked){
-      const c = pendingAiRules[Number(chk.dataset.idx)];
-      if(c){ state.rules.push({ id: uid(), keyword: c.keyword, categoryId: c.categoryId }); added++; }
-    }
-  });
-  if(added){ persistConfig(); renderRules(); }
-  dismissAiRules();
-  appAlert(added + " règle(s) ajoutée(s).");
-}
-function dismissAiRules(){
-  pendingAiRules = [];
-  document.getElementById("aiRulesReview").style.display = "none";
-  document.getElementById("aiRulesList").innerHTML = "";
-}
-
 /* ---------------- Dashboard ---------------- */
 let chartMonthlyInstance = null, chartByCategoryInstance = null;
 const CAT_CHART_COLORS = ["#2F5D50","#B5533C","#B4881E","#3A6EA5","#7A4C9E","#4C8C4A","#C2534F","#5B7A99"];
@@ -2182,22 +2204,26 @@ function renderMonthlyChart(monthsAsc, txs){
 function renderCategoryTrendChart(monthsAsc, txs){
   txs = txs || state.transactions;
   const ctx = document.getElementById("chartByCategory");
+  // Net par regroupement de catégorie (les remboursements s'y soustraient naturellement).
   const totals = {};
   txs.forEach(t=>{
-    if(t.amount >= 0) return;
     const label = categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId));
-    totals[label] = (totals[label]||0) + Math.abs(t.amount);
+    totals[label] = (totals[label]||0) - t.amount;
   });
-  const sortedLabels = Object.keys(totals).sort((a,b)=>totals[b]-totals[a]);
+  const sortedLabels = Object.keys(totals).filter(l=>totals[l]>0.01).sort((a,b)=>totals[b]-totals[a]);
   const TOP_N = 6;
   const topLabels = sortedLabels.slice(0, TOP_N);
   const otherLabels = sortedLabels.slice(TOP_N);
 
+  function netSpendFor(rows, label){
+    const net = rows.reduce((s,t)=>s+t.amount,0);
+    return Math.max(-net, 0);
+  }
+
   const datasets = topLabels.map((label,i)=>({
     label,
-    data: monthsAsc.map(m=> txs
-      .filter(t=>monthKey(t.date)===m && t.amount<0 && categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))===label)
-      .reduce((s,t)=>s+Math.abs(t.amount),0)),
+    data: monthsAsc.map(m=> netSpendFor(txs
+      .filter(t=>monthKey(t.date)===m && categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))===label))),
     borderColor: CAT_CHART_COLORS[i % CAT_CHART_COLORS.length],
     backgroundColor: CAT_CHART_COLORS[i % CAT_CHART_COLORS.length] + "22",
     tension: .25
@@ -2205,9 +2231,8 @@ function renderCategoryTrendChart(monthsAsc, txs){
   if(otherLabels.length){
     datasets.push({
       label: "Autres",
-      data: monthsAsc.map(m=> txs
-        .filter(t=>monthKey(t.date)===m && t.amount<0 && otherLabels.includes(categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))))
-        .reduce((s,t)=>s+Math.abs(t.amount),0)),
+      data: monthsAsc.map(m=> netSpendFor(txs
+        .filter(t=>monthKey(t.date)===m && otherLabels.includes(categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId)))))),
       borderColor: "#8B8674", backgroundColor: "#8B867422", tension: .25, borderDash: [4,3]
     });
   }
@@ -2234,13 +2259,14 @@ function renderDashboard(){
   const monthFilter = document.getElementById("dashMonth").value;
   const rows = monthFilter ? scoped.filter(t=>monthKey(t.date)===monthFilter) : scoped;
 
-  const expenseCats = state.categories.filter(c=>c.type==="depense");
   const box = document.getElementById("dashCats");
   box.innerHTML = "";
-  const totalsByCat = expenseCats.map(cat=>{
-    const total = rows.filter(t=>t.categoryId===cat.id && t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
-    return { cat, total };
-  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+  // Net par catégorie (les remboursements/retours s'équilibrent avec les dépenses de la même
+  // catégorie, plus besoin de distinguer dépense/revenu au niveau de la catégorie elle-même).
+  const totalsByCat = state.categories.map(cat=>{
+    const net = rows.filter(t=>t.categoryId===cat.id).reduce((s,t)=>s+t.amount,0);
+    return { cat, total: -net };
+  }).filter(x=>x.total>0.01).sort((a,b)=>b.total-a.total);
 
   const maxVal = Math.max(...totalsByCat.map(x=>x.total), 1);
   document.getElementById("dashCatsEmpty").style.display = totalsByCat.length ? "none" : "block";
@@ -2343,7 +2369,6 @@ function resetTransactionsData(){
     "RESET",
     ()=>{
       closeCategoryPicker();
-      dismissAiRules();
       selectedIds.clear();
       parsedRows = null; parsedHeaders = null; currentImportFileName = ""; duplicateMatches = [];
       document.getElementById("mappingBox").style.display = "none";
