@@ -55,7 +55,7 @@
   .kpi .v.pos{ color:var(--green); }
   .kpi .v.neg{ color:var(--terracotta); }
 
-  nav.tabs{ display:flex; gap:4px; margin-bottom:18px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  nav.tabs{ display:flex; gap:4px; margin-bottom:18px; border-bottom:1px solid var(--border); flex-wrap:wrap; position:sticky; top:0; z-index:70; background:var(--bg); padding-top:6px; }
   nav.tabs button{
     font-family:var(--font-display); font-size:15px; background:none; border:none; color:var(--muted);
     padding:10px 4px; margin-right:24px; cursor:pointer; border-bottom:3px solid transparent;
@@ -70,7 +70,7 @@
 
   .card{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; margin-bottom:18px; }
   .tx-sticky-bar{
-    position: sticky; top: 0; z-index: 60;
+    position: sticky; top: 56px; z-index: 60;
     background: var(--surface); padding-top: 18px; padding-bottom: 10px;
   }
   .card h2{ font-family:var(--font-display); font-size:19px; font-weight:600; margin:0 0 4px; }
@@ -771,6 +771,7 @@ function startAutoRefresh(){
 async function refreshFromDrive(isInitial){
   if(!scriptUrl) return;
   try{
+    if(!isInitial) await flushPendingPersist(); // n'écrase jamais une saisie pas encore envoyée
     const res = await fetch(scriptUrl, { method: "GET" });
     if(!res.ok) throw new Error("HTTP " + res.status);
     const remote = await res.json();
@@ -810,11 +811,10 @@ function manualRefresh(){
 
 /* Écritures : mettent à jour le cache local `state` puis programment
    une sauvegarde (Google si connecté, sinon juste ce navigateur). */
-function schedulePersist(){
-  saveLocal();
-  if(storageMode !== "google" || !scriptUrl) return;
-  clearTimeout(persistTimer);
-  persistTimer = setTimeout(async ()=>{
+let persistInFlight = null;
+
+function doPersistWrite(){
+  persistInFlight = (async ()=>{
     try{
       const res = await fetch(scriptUrl, {
         method: "POST",
@@ -827,7 +827,29 @@ function schedulePersist(){
       if(!res.ok) throw new Error("HTTP " + res.status);
       showSyncBanner("google");
     }catch(e){ console.error(e); showSyncBanner("error"); }
-  }, 800);
+    finally{ persistInFlight = null; }
+  })();
+  return persistInFlight;
+}
+
+/* S'assure qu'aucune écriture locale en attente ne traîne avant de lire depuis Drive —
+   sinon une lecture pourrait ramener une version plus ancienne et écraser une saisie
+   récente qui n'avait pas encore eu le temps d'être envoyée. */
+async function flushPendingPersist(){
+  if(persistTimer){
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    await doPersistWrite();
+  }else if(persistInFlight){
+    await persistInFlight;
+  }
+}
+
+function schedulePersist(){
+  saveLocal();
+  if(storageMode !== "google" || !scriptUrl) return;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(()=>{ persistTimer = null; doPersistWrite(); }, 800);
 }
 function persistConfig(){ schedulePersist(); }
 function persistTxUpsert(){ schedulePersist(); }
@@ -835,16 +857,23 @@ function persistTxBulk(){ schedulePersist(); }
 function persistTxDelete(){ schedulePersist(); }
 
 /* ---------------- Navigation ---------------- */
+const ACTIVE_TAB_KEY = "familyBudget_activeTab";
+
+function activateTab(view){
+  const btn = document.querySelector(`nav.tabs button[data-view="${view}"]`);
+  if(!btn) return;
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.remove("active"));
+  document.querySelectorAll("section.view").forEach(v=>v.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("view-"+view).classList.add("active");
+  if(view === "dashboard") renderDashboard();
+  if(view === "transactions") renderTransactions();
+  if(view === "budget") renderBudgets();
+  try{ localStorage.setItem(ACTIVE_TAB_KEY, view); }catch(e){}
+}
+
 document.querySelectorAll("nav.tabs button").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.remove("active"));
-    document.querySelectorAll("section.view").forEach(v=>v.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("view-"+btn.dataset.view).classList.add("active");
-    if(btn.dataset.view === "dashboard") renderDashboard();
-    if(btn.dataset.view === "transactions") renderTransactions();
-    if(btn.dataset.view === "budget") renderBudgets();
-  });
+  btn.addEventListener("click", ()=> activateTab(btn.dataset.view));
 });
 
 const famTitleInput = document.getElementById("famTitle");
@@ -2508,6 +2537,15 @@ function renderAll(){
   renderBudgets();
 }
 initStorage();
+
+// Restaure l'onglet actif de la dernière visite.
+try{
+  const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+  if(savedTab && savedTab !== "import" && document.getElementById("view-"+savedTab)){
+    activateTab(savedTab);
+  }
+}catch(e){}
+
 </script>
 </body>
 </html>
