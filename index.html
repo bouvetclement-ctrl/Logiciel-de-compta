@@ -415,6 +415,11 @@
 
   <!-- ============ BUDGET ============ -->
   <section class="view" id="view-budget">
+    <div class="card" id="budgetTotalsCard">
+      <h2 style="font-size:15px; margin-bottom:8px;">Total des budgets</h2>
+      <div id="budgetTotalsBox"></div>
+      <div id="budgetTotalsEmpty" class="empty">Aucun budget défini pour le moment.</div>
+    </div>
     <div class="card">
       <div class="toolbar">
         <h2 style="margin:0;">Définir un budget</h2>
@@ -473,7 +478,7 @@
       </div>
       <p class="hint" style="margin-top:-8px;">La suggestion calcule votre dépense moyenne passée sur la période choisie pour cette portée et pré-remplit le montant — à vous de valider ou d'ajuster avant d'ajouter. « Lisser sur l'année » compare vos dépenses au rythme attendu à date plutôt qu'au total annuel complet. Une « provision » n'est pas un plafond à ne pas dépasser : c'est un objectif de réserve, pour une dépense ponctuelle prévue (vacances, impôts...) ou un imprévu.</p>
       <table>
-        <thead><tr><th>Portée</th><th>Type</th><th>Période</th><th class="num">Montant</th><th>Lissage</th><th></th><th></th></tr></thead>
+        <thead><tr><th>Portée</th><th>Type</th><th>Période</th><th class="num">Montant</th><th>Lissage</th><th></th><th></th><th></th></tr></thead>
         <tbody id="budgetDefTable"></tbody>
       </table>
       <div id="budgetDefEmpty" class="empty">Aucun budget défini pour le moment.</div>
@@ -765,7 +770,12 @@ function disconnectDrive(){
 
 function startAutoRefresh(){
   if(autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(()=>refreshFromDrive(false), 60000);
+  autoRefreshTimer = setInterval(()=>{
+    // Ne pas interrompre une sélection de catégorie en cours.
+    const picker = document.getElementById("catMenuPopover");
+    if(picker && picker.classList.contains("open")) return;
+    refreshFromDrive(false);
+  }, 60000);
 }
 
 async function refreshFromDrive(isInitial){
@@ -1150,9 +1160,43 @@ function renderBudgetDefinitions(){
             onchange="updateBudgetAmount('${b.id}', this.value)"></td>
       <td>${b.period==="annual" ? `<label class="chk ${b.smooth?"on":""}" style="font-size:12px; display:inline-flex;"><input type="checkbox" ${b.smooth?"checked":""} onchange="updateBudgetSmooth('${b.id}', this.checked)" style="width:auto;"> Lisser</label>` : "—"}</td>
       <td><button class="btn secondary small" onclick="showBudgetBilan('${b.id}')">📊 Bilan</button></td>
+      <td><button class="btn secondary small" onclick="recalcBudgetFromHistory('${b.id}')">🔄 Recalculer</button></td>
       <td><button class="icon-btn" onclick="removeBudget('${b.id}')">✕</button></td>
     </tr>`).join("");
   document.getElementById("budgetDefEmpty").style.display = sorted.length ? "none" : "block";
+}
+
+function recalcBudgetFromHistory(id){
+  const b = state.budgets.find(x=>x.id===id);
+  if(!b) return;
+  openModal({
+    title: "Recalculer depuis l'historique",
+    message: `Portée : ${budgetScopeLabel(b.scope)} (${b.period==='monthly'?'mensuel':'annuel'}). Sur quelle période passée calculer la nouvelle moyenne ?`,
+    fields: [{
+      id: "lookback", label: "Période d'historique (en mois : 1, 3, 6, 10 ou 12)",
+      value: "3", placeholder: "3"
+    }],
+    confirmLabel: "Calculer",
+    onConfirm: (v)=>{
+      const months = parseInt(v.lookback, 10);
+      if(!months || months <= 0){ showModalError("Indiquez un nombre de mois valide (ex. 3, 6, 12)."); return false; }
+      const { monthlyAvg, suggested } = computeSuggestedAmount(b.scope, b.period, months);
+      openModal({
+        title: "Nouveau montant suggéré",
+        message: `Sur les ${months} dernier(s) mois, la moyenne pour « ${budgetScopeLabel(b.scope)} » est de ${euro(monthlyAvg)}/mois.\nMontant ${b.period==='annual'?'annuel':'mensuel'} suggéré : ${euro(suggested)}.\nActuel : ${euro(b.amount)}.`,
+        confirmLabel: "Appliquer " + euro(Math.round(suggested)),
+        cancelLabel: "Annuler",
+        onConfirm: ()=>{
+          b.amount = Math.round(suggested);
+          persistConfig();
+          renderBudgetDefinitions();
+          renderBudgetTracking();
+          return true;
+        }
+      });
+      return true;
+    }
+  });
 }
 
 function txMatchesScope(t, scope){
@@ -1166,8 +1210,11 @@ function txMatchesScope(t, scope){
    se soustraient aux dépenses de la même catégorie plutôt que d'être ignorés. Jamais négatif
    (un net positif — plus de remboursements que de dépenses — compte comme 0 dépensé). */
 function netSpend(rows){
+  // Valeur absolue du solde net : les remboursements s'équilibrent avec les dépenses de la
+  // même catégorie (comme avant), mais une catégorie majoritairement créditrice (ex. Salaire)
+  // n'est plus ramenée à 0 — son montant net positif est bien pris en compte.
   const net = rows.reduce((s,t)=>s+t.amount,0);
-  return Math.max(-net, 0);
+  return Math.abs(net);
 }
 
 /* Fraction de l'année déjà écoulée (1 pour une année révolue, 0 pour une année future). */
@@ -1214,18 +1261,36 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
   }).join("");
 
   let annualTargetSum = 0, annualSpentSum = 0;
-  const annualHTML = annualBudgets.map(b=>{
+  const annualRows = [];
+  annualBudgets.forEach(b=>{
     const spent = netSpend(txs.filter(t=> (t.date||"").slice(0,4)===selYear && txMatchesScope(t,b.scope)));
     const fraction = b.smooth ? yearProgressFraction(selYear) : 1;
     const target = b.amount * fraction;
     annualTargetSum += target; annualSpentSum += spent;
     const isProv = b.kind === "provision";
     const hint = b.smooth ? `rythme attendu à date sur un objectif annuel de ${euro(b.amount)}` : (isProv ? "objectif de réserve annuel" : "objectif annuel");
-    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (annuel" + (isProv?", provision":"") + (b.smooth?", lissé":"") + ")", target, spent, hint, isProv);
-  }).join("");
+    annualRows.push(renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (annuel" + (isProv?", provision":"") + (b.smooth?", lissé":"") + ")", target, spent, hint, isProv));
+  });
+
+  // Budgets annuels dérivés : pour toute portée qui a un budget mensuel mais pas de budget
+  // annuel explicite, on déduit l'objectif annuel = mensuel × 12 automatiquement.
+  const explicitAnnualScopeKeys = new Set(annualBudgets.map(b=>b.scope.type+"|"+b.scope.value));
+  const derivedFromMonthly = monthlyBudgets.filter(b=>!explicitAnnualScopeKeys.has(b.scope.type+"|"+b.scope.value));
+  derivedFromMonthly.forEach(b=>{
+    const spent = netSpend(txs.filter(t=> (t.date||"").slice(0,4)===selYear && txMatchesScope(t,b.scope)));
+    const target = b.amount * 12;
+    annualTargetSum += target; annualSpentSum += spent;
+    const isProv = b.kind === "provision";
+    annualRows.push(renderBudgetProgressRow(
+      budgetScopeLabel(b.scope) + " (annuel, dérivé du mensuel" + (isProv?", provision":"") + ")",
+      target, spent, `= 12 × ${euro(b.amount)}/mois`, isProv
+    ));
+  });
+  const annualHTML = annualRows.join("");
+  const annualCount = annualBudgets.length + derivedFromMonthly.length;
 
   let summaryHTML = "";
-  if(monthlyBudgets.length || annualBudgets.length){
+  if(monthlyBudgets.length || annualCount){
     const parts = [];
     if(monthlyBudgets.length){
       const over = monthlySpentSum > monthlyTargetSum;
@@ -1233,7 +1298,7 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
         <strong style="font-family:var(--font-mono); color:${over?'var(--terracotta)':'var(--green)'};">${euro(monthlySpentSum)}</strong>
         <span class="hint" style="margin:0;"> / ${euro(monthlyTargetSum)} budgété</span></div>`);
     }
-    if(annualBudgets.length){
+    if(annualCount){
       const over = annualSpentSum > annualTargetSum;
       parts.push(`<div><span class="hint" style="margin:0;">Bilan annuel (${selYear})</span><br>
         <strong style="font-family:var(--font-mono); color:${over?'var(--terracotta)':'var(--green)'};">${euro(annualSpentSum)}</strong>
@@ -1244,7 +1309,7 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
 
   return {
     monthlyHTML, annualHTML, summaryHTML,
-    hasAny: monthlyBudgets.length + annualBudgets.length > 0,
+    hasAny: monthlyBudgets.length + annualCount > 0,
     monthlyTargetSum, monthlySpentSum, annualTargetSum, annualSpentSum
   };
 }
@@ -1410,18 +1475,25 @@ function exportBudgetPdf(){
     y += 6;
   }
 
-  if(annualBudgets.length){
+  const explicitAnnualScopeKeysPdf = new Set(annualBudgets.map(b=>b.scope.type+"|"+b.scope.value));
+  const derivedAnnualPdf = monthlyBudgets.filter(b=>!explicitAnnualScopeKeysPdf.has(b.scope.type+"|"+b.scope.value));
+
+  if(annualBudgets.length || derivedAnnualPdf.length){
     sectionTitle(`Budgets annuels — ${selYear}`);
     annualBudgets.forEach(b=>{
       const spent = netSpend(scoped.filter(t=>(t.date||"").slice(0,4)===selYear && txMatchesScope(t,b.scope)));
       const fraction = b.smooth ? yearProgressFraction(selYear) : 1;
       row(budgetScopeLabel(b.scope) + (b.kind==="provision"?" (provision)":"") + (b.smooth?" (lissé)":""), b.amount*fraction, spent, false);
     });
+    derivedAnnualPdf.forEach(b=>{
+      const spent = netSpend(scoped.filter(t=>(t.date||"").slice(0,4)===selYear && txMatchesScope(t,b.scope)));
+      row(budgetScopeLabel(b.scope) + " (dérivé du mensuel)" + (b.kind==="provision"?" (provision)":""), b.amount*12, spent, false);
+    });
     y += 1; doc.setDrawColor(220); doc.line(14,y,196,y); y+=5;
     row("TOTAL", annualTargetSum, annualSpentSum, true);
   }
 
-  if(!monthlyBudgets.length && !annualBudgets.length){
+  if(!monthlyBudgets.length && !annualBudgets.length && !derivedAnnualPdf.length){
     doc.setFont("helvetica","italic"); doc.setFontSize(11); doc.setTextColor(120);
     doc.text("Aucun budget défini pour le moment.", 14, y);
   }
@@ -1430,7 +1502,38 @@ function exportBudgetPdf(){
   doc.save((safe||"budget") + "-bilan-" + selMonth + ".pdf");
 }
 
+function classifyBudgetFlow(scope){
+  const net = getScopedTransactions().filter(t=>txMatchesScope(t,scope)).reduce((s,t)=>s+t.amount,0);
+  return net >= 0 ? "revenu" : "depense";
+}
+
+function renderBudgetTotals(){
+  const box = document.getElementById("budgetTotalsBox");
+  if(state.budgets.length === 0){
+    box.innerHTML = "";
+    document.getElementById("budgetTotalsEmpty").style.display = "block";
+    return;
+  }
+  document.getElementById("budgetTotalsEmpty").style.display = "none";
+  let totalDepense = 0, totalRevenu = 0;
+  state.budgets.forEach(b=>{
+    const monthlyEquiv = b.period === "monthly" ? b.amount : b.amount / 12;
+    if(classifyBudgetFlow(b.scope) === "revenu") totalRevenu += monthlyEquiv;
+    else totalDepense += monthlyEquiv;
+  });
+  box.innerHTML = `
+    <div style="display:flex; gap:28px; flex-wrap:wrap;">
+      <div><span class="hint" style="margin:0;">Total budgets de dépenses (équivalent mensuel)</span><br>
+        <strong style="font-family:var(--font-mono); color:var(--terracotta); font-size:18px;">${euro(totalDepense)}</strong></div>
+      <div><span class="hint" style="margin:0;">Total budgets de revenus (équivalent mensuel)</span><br>
+        <strong style="font-family:var(--font-mono); color:var(--green); font-size:18px;">${euro(totalRevenu)}</strong></div>
+      <div><span class="hint" style="margin:0;">Solde budgété</span><br>
+        <strong style="font-family:var(--font-mono); font-size:18px; color:${(totalRevenu-totalDepense)>=0?'var(--green)':'var(--terracotta)'};">${(totalRevenu-totalDepense)>=0?"+":""}${euro(totalRevenu-totalDepense)}</strong></div>
+    </div>`;
+}
+
 function renderBudgets(){
+  renderBudgetTotals();
   renderBudgetDefinitions();
   renderBudgetTracking();
 }
@@ -2204,8 +2307,14 @@ function categoryBucketLabel(cat){
   return cat.group || cat.name;
 }
 
+function isDashboardVisible(){
+  const section = document.getElementById("view-dashboard");
+  return !!(section && section.classList.contains("active"));
+}
+
 function renderMonthlyChart(monthsAsc, txs){
   txs = txs || state.transactions;
+  if(!isDashboardVisible()) return; // un canevas caché (display:none) se dimensionne à 0 et reste vide
   const ctx = document.getElementById("chartMonthly");
   if(chartMonthlyInstance){ chartMonthlyInstance.destroy(); chartMonthlyInstance = null; }
   if(typeof Chart === "undefined" || monthsAsc.length === 0) return;
@@ -2232,6 +2341,7 @@ function renderMonthlyChart(monthsAsc, txs){
 
 function renderCategoryTrendChart(monthsAsc, txs){
   txs = txs || state.transactions;
+  if(!isDashboardVisible()) return;
   const ctx = document.getElementById("chartByCategory");
   // Net par regroupement de catégorie (les remboursements s'y soustraient naturellement).
   const totals = {};
