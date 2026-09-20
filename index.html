@@ -409,7 +409,7 @@
         </div>
         <div class="field">
           <label>Période</label>
-          <select id="budgetPeriod">
+          <select id="budgetPeriod" onchange="toggleBudgetSmoothField()">
             <option value="monthly">Mensuel</option>
             <option value="annual">Annuel</option>
           </select>
@@ -418,10 +418,16 @@
           <label>Montant cible (€)</label>
           <input type="number" min="0" step="1" id="budgetAmount" placeholder="0">
         </div>
+        <div class="field" id="budgetSmoothField" style="display:none; align-self:end;">
+          <label class="chk on" style="display:inline-flex;">
+            <input type="checkbox" id="budgetSmoothInput" style="width:auto;"> Lisser sur l'année
+          </label>
+        </div>
         <div class="field" style="align-self:end;"><button class="btn" onclick="addBudget()">Ajouter</button></div>
       </div>
+      <p class="hint" style="margin-top:-8px;">« Lisser sur l'année » compare vos dépenses au rythme attendu à date (montant annuel ÷ 12 × mois écoulés) plutôt qu'au total annuel complet — utile pour savoir si vous êtes dans les temps en cours d'année.</p>
       <table>
-        <thead><tr><th>Portée</th><th>Période</th><th class="num">Montant</th><th></th></tr></thead>
+        <thead><tr><th>Portée</th><th>Période</th><th class="num">Montant</th><th>Lissage</th><th></th></tr></thead>
         <tbody id="budgetDefTable"></tbody>
       </table>
       <div id="budgetDefEmpty" class="empty">Aucun budget défini pour le moment.</div>
@@ -448,26 +454,43 @@
 
   <!-- ============ DASHBOARD ============ -->
   <section class="view" id="view-dashboard">
-    <div class="card">
+    <div class="card" style="padding:14px 18px;">
+      <h2 style="font-size:15px; margin-bottom:10px;">⚙️ Personnaliser le tableau de bord</h2>
+      <div style="display:flex; flex-wrap:wrap; gap:8px 18px;">
+        <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_monthlyChart" onchange="updateDashboardConfig()" style="width:auto;"> Évolution mensuelle</label>
+        <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_categoryChart" onchange="updateDashboardConfig()" style="width:auto;"> Habitudes par catégorie</label>
+        <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_budgetStatus" onchange="updateDashboardConfig()" style="width:auto;"> État des budgets</label>
+        <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_breakdown" onchange="updateDashboardConfig()" style="width:auto;"> Répartition par catégorie</label>
+        <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_monthTable" onchange="updateDashboardConfig()" style="width:auto;"> Détail mensuel</label>
+      </div>
+    </div>
+    <div class="card" id="dashCard_monthlyChart">
       <h2>Évolution mensuelle</h2>
       <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
       <canvas id="chartMonthly" height="110"></canvas>
     </div>
-    <div class="card">
+    <div class="card" id="dashCard_categoryChart">
       <h2>Habitudes de dépense par catégorie</h2>
       <p class="sub" id="chartCatSub">Évolution mensuelle des principaux postes de dépense.</p>
       <canvas id="chartByCategory" height="130"></canvas>
     </div>
-    <div class="card">
+    <div class="card" id="dashCard_budgetStatus">
       <div class="toolbar">
-        <h2 style="margin:0;">Répartition par catégorie</h2>
+        <h2 style="margin:0;">État des budgets</h2>
         <select id="dashMonth" onchange="renderDashboard()" style="max-width:180px;"></select>
       </div>
-      <p class="sub">Dépenses par poste sur la période sélectionnée.</p>
+      <p class="sub">Budgets mensuels du mois sélectionné, et budgets annuels de l'année correspondante.</p>
+      <div id="dashBudgetMonthly"></div>
+      <div id="dashBudgetAnnual"></div>
+      <div id="dashBudgetEmpty" class="empty">Aucun budget défini — allez dans l'onglet Budget pour en créer.</div>
+    </div>
+    <div class="card" id="dashCard_breakdown">
+      <h2>Répartition par catégorie</h2>
+      <p class="sub">Dépenses par poste sur la période sélectionnée ci-dessus.</p>
       <div id="dashCats"></div>
       <div id="dashCatsEmpty" class="empty">Aucune dépense catégorisée sur cette période.</div>
     </div>
-    <div class="card">
+    <div class="card" id="dashCard_monthTable">
       <h2>Détail mensuel</h2>
       <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
       <div class="table-scroll">
@@ -587,8 +610,11 @@ function defaultCategories(){
     { id: uid(), name: "Divers", type: "depense" },
   ];
 }
+function defaultDashboardConfig(){
+  return { monthlyChart:true, categoryChart:true, budgetStatus:true, breakdown:true, monthTable:true };
+}
 function defaultState(){
-  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [], openingBalance: { date: "", amount: 0 }, budgets: [] };
+  return { famTitle: "Comptes de la famille", categories: defaultCategories(), rules: [], transactions: [], imports: [], openingBalance: { date: "", amount: 0 }, budgets: [], dashboardConfig: defaultDashboardConfig() };
 }
 
 function loadLocalState(){
@@ -602,7 +628,7 @@ function loadLocalState(){
 }
 function saveLocal(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance, budgets: state.budgets
+    famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance, budgets: state.budgets, dashboardConfig: state.dashboardConfig
   })); }catch(e){}
 }
 
@@ -679,6 +705,7 @@ async function refreshFromDrive(isInitial){
       state.imports = remote.imports || state.imports;
       state.openingBalance = remote.openingBalance || state.openingBalance;
       state.budgets = remote.budgets || state.budgets;
+      state.dashboardConfig = remote.dashboardConfig || state.dashboardConfig;
       famTitleInput.value = state.famTitle;
       saveLocal();
       renderAll();
@@ -712,7 +739,7 @@ function schedulePersist(){
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" }, // évite le preflight CORS
         body: JSON.stringify({
-          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance, budgets: state.budgets
+          famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports, openingBalance: state.openingBalance, budgets: state.budgets, dashboardConfig: state.dashboardConfig
         })
       });
       if(!res.ok) throw new Error("HTTP " + res.status);
@@ -820,6 +847,11 @@ function renderBudgetScopeOptions(){
   }
 }
 
+function toggleBudgetSmoothField(){
+  const period = document.getElementById("budgetPeriod").value;
+  document.getElementById("budgetSmoothField").style.display = period === "annual" ? "flex" : "none";
+}
+
 function budgetScopeLabel(scope){
   if(scope.type === "group") return scope.value;
   const cat = state.categories.find(c=>c.id===scope.value);
@@ -831,6 +863,7 @@ function addBudget(){
   const searchVal = document.getElementById("budgetScopeSearch").value.trim();
   const period = document.getElementById("budgetPeriod").value;
   const amount = parseFrenchNumber(document.getElementById("budgetAmount").value);
+  const smooth = period === "annual" && document.getElementById("budgetSmoothInput").checked;
   if(!searchVal){ appAlert("Choisissez une catégorie principale ou une sous-catégorie."); return; }
   if(isNaN(amount) || amount <= 0){ appAlert("Indiquez un montant cible valide."); return; }
 
@@ -846,9 +879,10 @@ function addBudget(){
 
   // Remplace un budget existant de même portée + même période plutôt que d'en créer un doublon.
   state.budgets = state.budgets.filter(b=> !(b.scope.type===scope.type && b.scope.value===scope.value && b.period===period));
-  state.budgets.push({ id: uid(), scope, period, amount });
+  state.budgets.push({ id: uid(), scope, period, amount, smooth });
   document.getElementById("budgetScopeSearch").value = "";
   document.getElementById("budgetAmount").value = "";
+  document.getElementById("budgetSmoothInput").checked = false;
   persistConfig();
   renderBudgets();
 }
@@ -859,6 +893,23 @@ function removeBudget(id){
   renderBudgets();
 }
 
+function updateBudgetAmount(id, value){
+  const b = state.budgets.find(x=>x.id===id);
+  if(!b) return;
+  const amount = parseFrenchNumber(value);
+  if(isNaN(amount) || amount < 0){ renderBudgetDefinitions(); return; }
+  b.amount = amount;
+  persistConfig();
+  renderBudgetTracking();
+}
+function updateBudgetSmooth(id, checked){
+  const b = state.budgets.find(x=>x.id===id);
+  if(!b) return;
+  b.smooth = checked;
+  persistConfig();
+  renderBudgetTracking();
+}
+
 function renderBudgetDefinitions(){
   const tbody = document.getElementById("budgetDefTable");
   const sorted = [...state.budgets].sort((a,b)=> budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"));
@@ -866,7 +917,9 @@ function renderBudgetDefinitions(){
     <tr>
       <td>${budgetScopeLabel(b.scope)}</td>
       <td>${b.period === "monthly" ? "Mensuel" : "Annuel"}</td>
-      <td class="num">${euro(b.amount)}</td>
+      <td class="num"><input type="number" min="0" step="1" value="${b.amount}" style="width:90px; text-align:right;"
+            onchange="updateBudgetAmount('${b.id}', this.value)"></td>
+      <td>${b.period==="annual" ? `<label class="chk ${b.smooth?"on":""}" style="font-size:12px; display:inline-flex;"><input type="checkbox" ${b.smooth?"checked":""} onchange="updateBudgetSmooth('${b.id}', this.checked)" style="width:auto;"> Lisser</label>` : "—"}</td>
       <td><button class="icon-btn" onclick="removeBudget('${b.id}')">✕</button></td>
     </tr>`).join("");
   document.getElementById("budgetDefEmpty").style.display = sorted.length ? "none" : "block";
@@ -879,22 +932,59 @@ function txMatchesScope(t, scope){
   return cat.id === scope.value;
 }
 
-function renderBudgetProgressRow(label, budgetAmount, spent){
-  const pct = budgetAmount > 0 ? Math.min((spent/budgetAmount)*100, 100) : (spent>0?100:0);
-  const over = spent > budgetAmount;
+/* Fraction de l'année déjà écoulée (1 pour une année révolue, 0 pour une année future). */
+function yearProgressFraction(year){
+  const y = parseInt(year, 10);
+  const now = new Date();
+  if(y < now.getFullYear()) return 1;
+  if(y > now.getFullYear()) return 0;
+  const start = new Date(y, 0, 1), end = new Date(y+1, 0, 1);
+  const elapsed = (now - start) / 86400000 + 1;
+  return Math.min(Math.max(elapsed / ((end-start)/86400000), 0), 1);
+}
+
+function renderBudgetProgressRow(label, targetAmount, spent, hint){
+  const pct = targetAmount > 0 ? Math.min((spent/targetAmount)*100, 100) : (spent>0?100:0);
+  const over = spent > targetAmount;
   return `<div class="cat-row">
     <div class="top">
       <span class="name">${label}</span>
-      <span class="figures">${euro(spent)} / ${euro(budgetAmount)}${over ? " · dépassement" : ""}</span>
+      <span class="figures">${euro(spent)} / ${euro(targetAmount)}${over ? " · dépassement" : ""}</span>
     </div>
     <div class="bar-track"><div class="bar-fill ${over?"exp":""}" style="width:${pct}%"></div></div>
+    ${hint ? `<div class="hint" style="margin-top:4px;">${hint}</div>` : ""}
   </div>`;
 }
 
-function renderBudgetTracking(){
-  const monthlyBudgets = state.budgets.filter(b=>b.period==="monthly");
-  const annualBudgets = state.budgets.filter(b=>b.period==="annual");
+/* Calcule le HTML de suivi des budgets mensuels/annuels pour un mois et une année donnés.
+   Réutilisé par l'onglet Budget et par la carte du tableau de bord. */
+function computeBudgetTrackingHTML(selMonth, selYear){
+  const monthlyBudgets = state.budgets.filter(b=>b.period==="monthly")
+    .sort((a,b)=>budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"));
+  const annualBudgets = state.budgets.filter(b=>b.period==="annual")
+    .sort((a,b)=>budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"));
 
+  const monthlyHTML = monthlyBudgets.map(b=>{
+    const spent = state.transactions
+      .filter(t=> monthKey(t.date)===selMonth && t.amount<0 && txMatchesScope(t,b.scope))
+      .reduce((s,t)=>s+Math.abs(t.amount),0);
+    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (mensuel)", b.amount, spent);
+  }).join("");
+
+  const annualHTML = annualBudgets.map(b=>{
+    const spent = state.transactions
+      .filter(t=> (t.date||"").slice(0,4)===selYear && t.amount<0 && txMatchesScope(t,b.scope))
+      .reduce((s,t)=>s+Math.abs(t.amount),0);
+    const fraction = b.smooth ? yearProgressFraction(selYear) : 1;
+    const target = b.amount * fraction;
+    const hint = b.smooth ? `rythme attendu à date sur un objectif annuel de ${euro(b.amount)}` : "objectif annuel";
+    return renderBudgetProgressRow(budgetScopeLabel(b.scope) + " (annuel" + (b.smooth?", lissé":"") + ")", target, spent, hint);
+  }).join("");
+
+  return { monthlyHTML, annualHTML, hasAny: monthlyBudgets.length + annualBudgets.length > 0 };
+}
+
+function renderBudgetTracking(){
   const monthPicker = document.getElementById("budgetMonthPicker");
   const months = Array.from(new Set(state.transactions.map(t=>monthKey(t.date)).filter(Boolean))).sort().reverse();
   const currentMonth = new Date().toISOString().slice(0,7);
@@ -911,29 +1001,11 @@ function renderBudgetTracking(){
   yearPicker.innerHTML = yearOptions.map(y=>`<option value="${y}">${y}</option>`).join("");
   yearPicker.value = yearOptions.includes(prevYearVal) ? prevYearVal : currentYear;
 
-  const selMonth = monthPicker.value;
-  const monthlyList = document.getElementById("budgetMonthlyList");
-  monthlyList.innerHTML = monthlyBudgets
-    .sort((a,b)=>budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"))
-    .map(b=>{
-      const spent = state.transactions
-        .filter(t=> monthKey(t.date)===selMonth && t.amount<0 && txMatchesScope(t,b.scope))
-        .reduce((s,t)=>s+Math.abs(t.amount),0);
-      return renderBudgetProgressRow(budgetScopeLabel(b.scope), b.amount, spent);
-    }).join("");
-  document.getElementById("budgetMonthlyEmpty").style.display = monthlyBudgets.length ? "none" : "block";
-
-  const selYear = yearPicker.value;
-  const annualList = document.getElementById("budgetAnnualList");
-  annualList.innerHTML = annualBudgets
-    .sort((a,b)=>budgetScopeLabel(a.scope).localeCompare(budgetScopeLabel(b.scope),"fr"))
-    .map(b=>{
-      const spent = state.transactions
-        .filter(t=> (t.date||"").slice(0,4)===selYear && t.amount<0 && txMatchesScope(t,b.scope))
-        .reduce((s,t)=>s+Math.abs(t.amount),0);
-      return renderBudgetProgressRow(budgetScopeLabel(b.scope), b.amount, spent);
-    }).join("");
-  document.getElementById("budgetAnnualEmpty").style.display = annualBudgets.length ? "none" : "block";
+  const { monthlyHTML, annualHTML } = computeBudgetTrackingHTML(monthPicker.value, yearPicker.value);
+  document.getElementById("budgetMonthlyList").innerHTML = monthlyHTML;
+  document.getElementById("budgetMonthlyEmpty").style.display = monthlyHTML ? "none" : "block";
+  document.getElementById("budgetAnnualList").innerHTML = annualHTML;
+  document.getElementById("budgetAnnualEmpty").style.display = annualHTML ? "none" : "block";
 }
 
 function renderBudgets(){
@@ -1929,6 +2001,37 @@ function renderDashboard(){
   const monthsAsc = [...months].sort();
   renderMonthlyChart(monthsAsc);
   renderCategoryTrendChart(monthsAsc);
+
+  // Carte "État des budgets" : mois sélectionné ci-dessus (ou mois courant si "Tous les mois").
+  const budgetMonth = monthFilter || new Date().toISOString().slice(0,7);
+  const budgetYear = budgetMonth.slice(0,4);
+  const { monthlyHTML, annualHTML } = computeBudgetTrackingHTML(budgetMonth, budgetYear);
+  document.getElementById("dashBudgetMonthly").innerHTML = monthlyHTML;
+  document.getElementById("dashBudgetAnnual").innerHTML = annualHTML;
+  document.getElementById("dashBudgetEmpty").style.display = (monthlyHTML || annualHTML) ? "none" : "block";
+
+  applyDashboardConfig();
+}
+
+/* ---------------- Personnalisation du tableau de bord ---------------- */
+function applyDashboardConfig(){
+  const cfg = Object.assign(defaultDashboardConfig(), state.dashboardConfig || {});
+  Object.keys(cfg).forEach(key=>{
+    const card = document.getElementById("dashCard_"+key);
+    const chk = document.getElementById("dashCfg_"+key);
+    if(chk) chk.checked = cfg[key];
+    if(card) card.style.display = cfg[key] ? "" : "none";
+  });
+}
+function updateDashboardConfig(){
+  const cfg = {};
+  Object.keys(defaultDashboardConfig()).forEach(key=>{
+    const chk = document.getElementById("dashCfg_"+key);
+    cfg[key] = chk ? chk.checked : true;
+  });
+  state.dashboardConfig = cfg;
+  persistConfig();
+  applyDashboardConfig();
 }
 
 /* ---------------- Export / Import sauvegarde ---------------- */
@@ -2027,6 +2130,7 @@ function importBackup(file){
       state.imports = parsed.imports || state.imports;
       state.openingBalance = parsed.openingBalance || state.openingBalance;
       state.budgets = parsed.budgets || state.budgets;
+      state.dashboardConfig = parsed.dashboardConfig || state.dashboardConfig;
       const importedTxs = parsed.transactions || [];
       importedTxs.forEach(t=>{
         const idx = state.transactions.findIndex(x=>x.id===t.id);
