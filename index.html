@@ -517,8 +517,23 @@
       </div>
     </div>
     <div class="card" id="dashCard_monthlyChart">
-      <h2>Évolution mensuelle</h2>
-      <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
+      <div class="toolbar">
+        <h2 style="margin:0;">Évolution</h2>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <select id="dashChartFreq" onchange="renderDashboard()" style="max-width:180px;">
+            <option value="month">Mensuelle</option>
+            <option value="biweek">Toutes les 2 semaines</option>
+            <option value="week">Hebdomadaire</option>
+          </select>
+          <select id="dashChartAmplitude" onchange="renderDashboard()" style="max-width:170px;">
+            <option value="12">12 dernières périodes</option>
+            <option value="26">26 dernières périodes</option>
+            <option value="52">52 dernières périodes</option>
+            <option value="0">Tout l'historique</option>
+          </select>
+        </div>
+      </div>
+      <p class="sub" id="chartFreqSub">Revenus, dépenses et solde, mois par mois.</p>
       <div style="position:relative; height:280px; width:100%;"><canvas id="chartMonthly"></canvas></div>
     </div>
     <div class="card" id="dashCard_categoryChart">
@@ -1930,6 +1945,29 @@ function confirmImport(){
 /* ---------------- Transactions ---------------- */
 function monthKey(date){ return (date||"").slice(0,7); }
 
+/* Découpe une date en période (mois / 2 semaines / semaine) pour les courbes du tableau de bord.
+   Les semaines sont calées sur le lundi, en jours depuis l'epoch (méthode robuste, sans
+   dépendre du numéro de semaine ISO qui pose des cas limites en fin/début d'année). */
+function periodKey(date, freq){
+  if(!date) return "";
+  if(freq === "month" || !freq) return monthKey(date);
+  const d = new Date(date + "T00:00:00");
+  if(isNaN(d)) return "";
+  const days = Math.floor(d.getTime() / 86400000);
+  const periodDays = freq === "week" ? 7 : 14;
+  const bucketIndex = Math.floor((days + 4) / periodDays); // +4 : 01/01/1970 était un jeudi, on cale sur lundi
+  const bucketStartDays = bucketIndex * periodDays - 4;
+  return new Date(bucketStartDays * 86400000).toISOString().slice(0,10);
+}
+function periodLabel(key, freq){
+  if(freq === "month" || !freq) return key;
+  const start = new Date(key + "T00:00:00");
+  const periodDays = freq === "week" ? 7 : 14;
+  const end = new Date(start.getTime() + (periodDays-1)*86400000);
+  const fmt = (d)=> d.toLocaleDateString("fr-FR", { day:"2-digit", month:"2-digit" });
+  return fmt(start) + "–" + fmt(end);
+}
+
 function renderMonthFilterOptions(){
   const months = Array.from(new Set(getScopedTransactions().map(t=>monthKey(t.date)).filter(Boolean))).sort().reverse();
   const opts = '<option value="">Tous les mois</option>' + months.map(m=>`<option value="${m}">${m}</option>`).join("");
@@ -2312,8 +2350,9 @@ function isDashboardVisible(){
   return !!(section && section.classList.contains("active"));
 }
 
-function renderMonthlyChart(monthsAsc, txs){
+function renderMonthlyChart(periods, txs, freq){
   txs = txs || state.transactions;
+  freq = freq || "month";
   if(!isDashboardVisible()) return; // un canevas caché (display:none) se dimensionne à 0 et reste vide
   const ctx = document.getElementById("chartMonthly");
   ctx.parentElement.querySelectorAll(".chart-error").forEach(el=>el.remove());
@@ -2327,14 +2366,15 @@ function renderMonthlyChart(monthsAsc, txs){
     ctx.after(err);
     return;
   }
-  if(monthsAsc.length === 0) return;
-  const inData = monthsAsc.map(m=>txs.filter(t=>monthKey(t.date)===m && t.amount>0).reduce((s,t)=>s+t.amount,0));
-  const outData = monthsAsc.map(m=>txs.filter(t=>monthKey(t.date)===m && t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0));
-  const netData = monthsAsc.map((m,i)=>inData[i]-outData[i]);
+  if(periods.length === 0) return;
+  const inData = periods.map(p=>txs.filter(t=>periodKey(t.date,freq)===p && t.amount>0).reduce((s,t)=>s+t.amount,0));
+  const outData = periods.map(p=>txs.filter(t=>periodKey(t.date,freq)===p && t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0));
+  const netData = periods.map((p,i)=>inData[i]-outData[i]);
+  const labels = periods.map(p=>periodLabel(p,freq));
   chartMonthlyInstance = new Chart(ctx, {
     type: "line",
     data: {
-      labels: monthsAsc,
+      labels,
       datasets: [
         { label: "Revenus", data: inData, borderColor: "#2F5D50", backgroundColor: "rgba(47,93,80,.15)", tension: .25 },
         { label: "Dépenses", data: outData, borderColor: "#B5533C", backgroundColor: "rgba(181,83,60,.15)", tension: .25 },
@@ -2350,13 +2390,17 @@ function renderMonthlyChart(monthsAsc, txs){
   });
 }
 
-function renderCategoryTrendChart(monthsAsc, txs){
+function renderCategoryTrendChart(periods, txs, freq){
   txs = txs || state.transactions;
+  freq = freq || "month";
   if(!isDashboardVisible()) return;
   const ctx = document.getElementById("chartByCategory");
-  // Net par regroupement de catégorie (les remboursements s'y soustraient naturellement).
+  // Net par regroupement de catégorie, sur la fenêtre affichée uniquement (les remboursements
+  // s'y soustraient naturellement).
+  const periodSet = new Set(periods);
+  const txsInWindow = txs.filter(t=>periodSet.has(periodKey(t.date, freq)));
   const totals = {};
-  txs.forEach(t=>{
+  txsInWindow.forEach(t=>{
     const label = categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId));
     totals[label] = (totals[label]||0) - t.amount;
   });
@@ -2372,8 +2416,8 @@ function renderCategoryTrendChart(monthsAsc, txs){
 
   const datasets = topLabels.map((label,i)=>({
     label,
-    data: monthsAsc.map(m=> netSpendFor(txs
-      .filter(t=>monthKey(t.date)===m && categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))===label))),
+    data: periods.map(p=> netSpendFor(txs
+      .filter(t=>periodKey(t.date,freq)===p && categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId))===label))),
     borderColor: CAT_CHART_COLORS[i % CAT_CHART_COLORS.length],
     backgroundColor: CAT_CHART_COLORS[i % CAT_CHART_COLORS.length] + "22",
     tension: .25
@@ -2381,8 +2425,8 @@ function renderCategoryTrendChart(monthsAsc, txs){
   if(otherLabels.length){
     datasets.push({
       label: "Autres",
-      data: monthsAsc.map(m=> netSpendFor(txs
-        .filter(t=>monthKey(t.date)===m && otherLabels.includes(categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId)))))),
+      data: periods.map(p=> netSpendFor(txs
+        .filter(t=>periodKey(t.date,freq)===p && otherLabels.includes(categoryBucketLabel(state.categories.find(c=>c.id===t.categoryId)))))),
       borderColor: "#8B8674", backgroundColor: "#8B867422", tension: .25, borderDash: [4,3]
     });
   }
@@ -2401,10 +2445,11 @@ function renderCategoryTrendChart(monthsAsc, txs){
     ctx.after(err);
     return;
   }
-  if(topLabels.length === 0 || monthsAsc.length === 0) return;
+  if(topLabels.length === 0 || periods.length === 0) return;
+  const labels = periods.map(p=>periodLabel(p,freq));
   chartByCategoryInstance = new Chart(ctx, {
     type: "line",
-    data: { labels: monthsAsc, datasets },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -2455,8 +2500,15 @@ function renderDashboard(){
   });
 
   const monthsAsc = [...months].sort();
-  renderMonthlyChart(monthsAsc, scoped);
-  renderCategoryTrendChart(monthsAsc, scoped);
+  const chartFreq = document.getElementById("dashChartFreq").value || "month";
+  const chartAmplitude = parseInt(document.getElementById("dashChartAmplitude").value, 10) || 0;
+  const freqLabels = { month: "mois par mois", biweek: "toutes les 2 semaines", week: "semaine par semaine" };
+  const amplitudeLabel = chartAmplitude > 0 ? ` (${chartAmplitude} dernières périodes)` : " (tout l'historique)";
+  document.getElementById("chartFreqSub").textContent = "Revenus, dépenses et solde, " + freqLabels[chartFreq] + amplitudeLabel + ".";
+  let chartPeriods = Array.from(new Set(scoped.map(t=>periodKey(t.date, chartFreq)).filter(Boolean))).sort();
+  if(chartAmplitude > 0) chartPeriods = chartPeriods.slice(-chartAmplitude);
+  renderMonthlyChart(chartPeriods, scoped, chartFreq);
+  renderCategoryTrendChart(chartPeriods, scoped, chartFreq);
 
   // Carte "État des budgets" : mois sélectionné ci-dessus (ou mois courant si "Tous les mois").
   const budgetMonth = monthFilter || new Date().toISOString().slice(0,7);
