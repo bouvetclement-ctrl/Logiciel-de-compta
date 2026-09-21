@@ -519,12 +519,12 @@
     <div class="card" id="dashCard_monthlyChart">
       <h2>Évolution mensuelle</h2>
       <p class="sub">Revenus, dépenses et solde, mois par mois.</p>
-      <canvas id="chartMonthly" height="110"></canvas>
+      <div style="position:relative; height:280px; width:100%;"><canvas id="chartMonthly"></canvas></div>
     </div>
     <div class="card" id="dashCard_categoryChart">
       <h2>Habitudes de dépense par catégorie</h2>
       <p class="sub" id="chartCatSub">Évolution mensuelle des principaux postes de dépense.</p>
-      <canvas id="chartByCategory" height="130"></canvas>
+      <div style="position:relative; height:280px; width:100%;"><canvas id="chartByCategory"></canvas></div>
     </div>
     <div class="card" id="dashCard_budgetStatus">
       <div class="toolbar">
@@ -2343,6 +2343,7 @@ function renderMonthlyChart(monthsAsc, txs){
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: { legend: { position: "bottom" } },
       scales: { y: { ticks: { callback: (v)=>euro(v) } } }
     }
@@ -2406,6 +2407,7 @@ function renderCategoryTrendChart(monthsAsc, txs){
     data: { labels: monthsAsc, datasets },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: { legend: { position: "bottom" } },
       scales: { y: { ticks: { callback: (v)=>euro(v) } } }
     }
