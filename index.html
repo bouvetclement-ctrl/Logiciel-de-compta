@@ -876,7 +876,7 @@ function activateTab(view){
   document.querySelectorAll("section.view").forEach(v=>v.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById("view-"+view).classList.add("active");
-  if(view === "dashboard") renderDashboard();
+  if(view === "dashboard") requestAnimationFrame(()=> requestAnimationFrame(renderDashboard));
   if(view === "transactions") renderTransactions();
   if(view === "budget") renderBudgets();
   try{ localStorage.setItem(ACTIVE_TAB_KEY, view); }catch(e){}
@@ -2316,8 +2316,18 @@ function renderMonthlyChart(monthsAsc, txs){
   txs = txs || state.transactions;
   if(!isDashboardVisible()) return; // un canevas caché (display:none) se dimensionne à 0 et reste vide
   const ctx = document.getElementById("chartMonthly");
+  ctx.parentElement.querySelectorAll(".chart-error").forEach(el=>el.remove());
   if(chartMonthlyInstance){ chartMonthlyInstance.destroy(); chartMonthlyInstance = null; }
-  if(typeof Chart === "undefined" || monthsAsc.length === 0) return;
+  if(typeof Chart === "undefined"){
+    ctx.parentElement.querySelectorAll(".chart-error").forEach(el=>el.remove());
+    const err = document.createElement("p");
+    err.className = "hint chart-error";
+    err.style.color = "var(--terracotta)";
+    err.textContent = "La bibliothèque de graphiques n'a pas pu se charger (connexion internet ?). Rechargez la page.";
+    ctx.after(err);
+    return;
+  }
+  if(monthsAsc.length === 0) return;
   const inData = monthsAsc.map(m=>txs.filter(t=>monthKey(t.date)===m && t.amount>0).reduce((s,t)=>s+t.amount,0));
   const outData = monthsAsc.map(m=>txs.filter(t=>monthKey(t.date)===m && t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0));
   const netData = monthsAsc.map((m,i)=>inData[i]-outData[i]);
@@ -2380,8 +2390,17 @@ function renderCategoryTrendChart(monthsAsc, txs){
     ? `Les ${topLabels.length} principaux postes de dépense${otherLabels.length ? " (le reste est regroupé sous « Autres »)" : ""}.`
     : "Pas encore assez de dépenses catégorisées pour ce graphique.";
 
+  ctx.parentElement.querySelectorAll(".chart-error").forEach(el=>el.remove());
   if(chartByCategoryInstance){ chartByCategoryInstance.destroy(); chartByCategoryInstance = null; }
-  if(typeof Chart === "undefined" || topLabels.length === 0 || monthsAsc.length === 0) return;
+  if(typeof Chart === "undefined"){
+    const err = document.createElement("p");
+    err.className = "hint chart-error";
+    err.style.color = "var(--terracotta)";
+    err.textContent = "La bibliothèque de graphiques n'a pas pu se charger (connexion internet ?). Rechargez la page.";
+    ctx.after(err);
+    return;
+  }
+  if(topLabels.length === 0 || monthsAsc.length === 0) return;
   chartByCategoryInstance = new Chart(ctx, {
     type: "line",
     data: { labels: monthsAsc, datasets },
