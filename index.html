@@ -128,6 +128,8 @@
   }
   .modal-overlay.open{ display:flex; }
   .modal-box{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; max-width:440px; width:100%; max-height:92vh; overflow-y:auto; }
+  .modal-box.wide{ max-width:680px; }
+  .modal-box #modalBodyHtml{ white-space:normal; }
   .modal-box h2{ font-family:var(--font-display); font-size:17px; margin:0 0 8px; }
   .modal-box .sub{ margin:0 0 14px; white-space:pre-wrap; }
   .modal-field{ margin-bottom:10px; }
@@ -464,7 +466,10 @@
     <div class="card">
       <div class="toolbar">
         <h2 style="margin:0;">Définir un budget</h2>
-        <button class="btn secondary small" onclick="exportBudgetPdf()">📄 Exporter le bilan en PDF</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn small" onclick="openAverageBudgetsFromJanuary()" title="Crée un budget mensuel par catégorie principale, égal à la dépense moyenne depuis le 1er janvier">🪄 Budgets moyens depuis le 1er janvier</button>
+          <button class="btn secondary small" onclick="exportBudgetPdf()">📄 Exporter le bilan en PDF</button>
+        </div>
       </div>
       <p class="sub">Sur une catégorie principale entière (tous ses sous-postes cumulés) ou sur une sous-catégorie précise, mensuel ou annuel.</p>
       <div class="grid-form">
@@ -887,7 +892,8 @@ const STORAGE_KEY = "familyBudget_v1";
 let modalState = null;
 
 /* `html` doit déjà être échappé par l'appelant (escapeHtml) ; title/message sont du texte brut. */
-function openModal({ title="", message="", html="", fields=[], confirmLabel="OK", cancelLabel="Annuler", danger=false, hideCancel=false, onConfirm, onCancel }){
+function openModal({ title="", message="", html="", fields=[], confirmLabel="OK", cancelLabel="Annuler", danger=false, hideCancel=false, wide=false, onConfirm, onCancel }){
+  document.querySelector("#modalOverlay .modal-box").classList.toggle("wide", !!wide);
   document.getElementById("modalTitle").textContent = title;
   document.getElementById("modalTitle").style.display = title ? "block" : "none";
   document.getElementById("modalMessage").textContent = message;
@@ -1972,6 +1978,91 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
     hasAny: monthlyBudgets.length + annualCount > 0,
     monthlyTargetSum, monthlySpentSum, annualTargetSum, annualSpentSum
   };
+}
+
+/* ---- Budgets moyens par catégorie principale depuis le 1er janvier ----
+   Moyenne mensuelle de la dépense nette de chaque catégorie principale sur les mois COMPLETS de
+   l'année en cours (le mois entamé n'est pas compté), limités aux mois couverts par l'historique.
+   Les virements internes et les catégories de revenus sont exclus. */
+function computeAverageBudgetsSinceJanuary(){
+  const scoped = getScopedTransactions();
+  const monthIndex = new Date().getMonth(); // nombre de mois complets depuis janvier
+  const months = monthIndex > 0 ? completeHistoryMonths(monthIndex, scoped) : [];
+  const monthSet = new Set(months);
+  const catMap = categoryMap();
+  const rows = [];
+  uniqueScopeGroups().forEach(g=>{
+    const scope = { type:"group", value:g };
+    const cats = state.categories.filter(c=>groupKey(c.group || c.name) === groupKey(g));
+    if(!cats.length || cats.every(c=>c.transfer)) return;
+    if(classifyBudgetFlow(scope) === "revenu") return;
+    const byMonth = {};
+    scoped.forEach(t=>{
+      const m = monthKey(t.date);
+      if(!monthSet.has(m) || !txMatchesScope(t, scope)) return;
+      const cat = catMap.get(t.categoryId);
+      if(cat && cat.transfer) return;
+      byMonth[m] = (byMonth[m] || 0) + t.amount;
+    });
+    const total = months.reduce((s,m)=> s + Math.max(-(byMonth[m] || 0), 0), 0);
+    const avg = months.length ? total / months.length : 0;
+    if(avg < 0.5) return;
+    const existing = state.budgets.find(b=>b.period==="monthly" && b.scope.type==="group" && groupKey(b.scope.value)===groupKey(g));
+    rows.push({ group:g, avg, total, existing });
+  });
+  rows.sort((a,b)=> b.avg - a.avg);
+  return { months, rows };
+}
+
+function openAverageBudgetsFromJanuary(){
+  const { months, rows } = computeAverageBudgetsSinceJanuary();
+  const accId = currentAccountId();
+  const accName = accId ? ((state.accounts.find(a=>a.id===accId)||{}).name || "") : "tous les comptes";
+  if(!months.length){
+    appAlert("Pas encore de mois complet depuis le 1er janvier dans l'historique (le mois en cours n'est pas compté car il n'est pas terminé).", "Budgets moyens");
+    return;
+  }
+  if(!rows.length){
+    appAlert(`Aucune dépense catégorisée depuis le 1er janvier (${monthsRangeLabel(months)}) pour ${accName}. Catégorisez d'abord vos opérations.`, "Budgets moyens");
+    return;
+  }
+  const totalAvg = rows.reduce((s,r)=>s+r.avg,0);
+  const html = `
+    <p style="margin:0 0 10px;">Dépense moyenne par mois de chaque catégorie principale, sur <strong>${months.length} mois complet(s)</strong>
+      (${escapeHtml(monthsRangeLabel(months))}) — ${escapeHtml(accName)}. Remboursements déduits, virements internes et revenus exclus.
+      Le mois en cours n'est pas compté car il n'est pas terminé.</p>
+    <div class="table-scroll"><table id="avgBudgetTable">
+      <thead><tr><th><input type="checkbox" checked style="width:auto;" onchange="document.querySelectorAll('#avgBudgetTable tbody input').forEach(c=>c.checked=this.checked)"></th>
+        <th>Catégorie principale</th><th class="num">Moyenne / mois</th><th class="num">Budget actuel</th></tr></thead>
+      <tbody>${rows.map((r,i)=>`<tr>
+        <td><input type="checkbox" data-i="${i}" checked style="width:auto;"></td>
+        <td>${escapeHtml(r.group)}</td>
+        <td class="num">${euro(Math.round(r.avg))}</td>
+        <td class="num" style="color:var(--muted);">${r.existing ? euro(r.existing.amount) + (r.existing.kind==="provision" ? " (provision)" : "") : "—"}</td>
+      </tr>`).join("")}
+      <tr style="font-weight:600;"><td></td><td>Total</td><td class="num">${euro(Math.round(totalAvg))}</td><td></td></tr></tbody>
+    </table></div>
+    <p class="hint" style="margin:10px 0 0;">Les budgets mensuels existants sur ces catégories sont mis à jour (leur type « provision » est conservé) ; les autres budgets ne sont pas touchés. ↶ Annuler permet de revenir en arrière.</p>`;
+  openModal({
+    title: "Budgets moyens depuis le 1er janvier",
+    html, wide: true,
+    confirmLabel: "Créer / mettre à jour les budgets cochés",
+    onConfirm: ()=>{
+      const picked = Array.from(document.querySelectorAll("#avgBudgetTable tbody input[data-i]:checked")).map(c=>rows[Number(c.dataset.i)]);
+      if(!picked.length){ showModalError("Cochez au moins une catégorie."); return false; }
+      let created = 0, updated = 0;
+      picked.forEach(r=>{
+        const amount = Math.round(r.avg);
+        const existing = state.budgets.find(b=>b.period==="monthly" && b.scope.type==="group" && groupKey(b.scope.value)===groupKey(r.group));
+        if(existing){ existing.amount = amount; updated++; }
+        else{ state.budgets.push({ id: uid(), scope:{ type:"group", value:r.group }, period:"monthly", amount, smooth:false, kind:"depense" }); created++; }
+      });
+      schedulePersist();
+      renderBudgets();
+      setTimeout(()=>appAlert(`${created} budget(s) créé(s), ${updated} mis à jour.`, "Budgets moyens"), 0);
+      return true;
+    }
+  });
 }
 
 /* ---- Bilan individuel d'un budget, avec recommandation d'ajustement ---- */
