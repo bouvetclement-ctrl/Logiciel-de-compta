@@ -1643,10 +1643,46 @@ function removeAccount(id){
 }
 
 /* ---------------- Budget ---------------- */
+/* Clé de comparaison d'une catégorie principale : « Alimentation », « ALIMENTATION » et
+   « Alimentation  » (espace en trop, souvent créée par un import CSV) sont la même. */
+function groupKey(name){
+  return String(name||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
+}
 function uniqueScopeGroups(){
-  const set = new Set();
-  state.categories.forEach(c=> set.add(c.group || c.name));
-  return Array.from(set).sort((a,b)=>a.localeCompare(b,"fr"));
+  const byKey = new Map();
+  state.categories.forEach(c=>{
+    const name = String(c.group || c.name).trim();
+    const k = groupKey(name);
+    if(k && !byKey.has(k)) byKey.set(k, name);
+  });
+  return Array.from(byKey.values()).sort((a,b)=>a.localeCompare(b,"fr"));
+}
+
+/* Mois COMPLETS utilisés pour une moyenne : les `lookback` mois qui précèdent le mois en cours
+   (jamais un mois entamé, sinon la moyenne dépend du jour du calcul), limités à ceux couverts par
+   l'historique (sinon on divise par 12 alors qu'il n'y a que 3 mois de données). Le premier mois
+   de l'historique n'est retenu que s'il commence dans la première semaine. */
+function completeHistoryMonths(lookback, txs){
+  const dates = txs.map(t=>t.date).filter(Boolean).sort();
+  if(!dates.length) return [];
+  const first = dates[0];
+  const firstMonth = first.slice(0,7);
+  const firstCounts = parseInt(first.slice(8,10), 10) <= 7;
+  const now = new Date();
+  const months = [];
+  for(let i = 1; i <= lookback; i++){
+    const m = localMonthStr(new Date(now.getFullYear(), now.getMonth() - i, 1));
+    if(m > firstMonth || (m === firstMonth && firstCounts)) months.push(m);
+  }
+  return months.reverse();
+}
+function monthLabelFr(m){
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(y, mo-1, 1).toLocaleDateString("fr-FR", { month:"long", year:"numeric" });
+}
+function monthsRangeLabel(months){
+  if(!months.length) return "";
+  return months.length === 1 ? monthLabelFr(months[0]) : monthLabelFr(months[0]) + " → " + monthLabelFr(months[months.length-1]);
 }
 
 function renderBudgetScopeOptions(){
@@ -1676,24 +1712,35 @@ function resolveScopeFromForm(){
   const searchVal = document.getElementById("budgetScopeSearch").value.trim();
   if(!searchVal){ appAlert("Choisissez une catégorie principale ou une sous-catégorie."); return null; }
   if(scopeType === "group"){
-    if(!uniqueScopeGroups().includes(searchVal)){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return null; }
-    return { type:"group", value: searchVal };
+    const match = uniqueScopeGroups().find(g=>groupKey(g) === groupKey(searchVal));
+    if(!match){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return null; }
+    return { type:"group", value: match };
   }
   const cat = findCategoryByLabel(searchVal);
   if(!cat){ appAlert("Sous-catégorie inconnue : « " + searchVal + " »."); return null; }
   return { type:"category", value: cat.id };
 }
 
+/* Moyenne mensuelle d'une portée sur les derniers mois complets. Le net est calculé mois par
+   mois (un remboursement compense la dépense du même mois) puis moyenné. */
 function computeSuggestedAmount(scope, period, lookbackMonths){
-  const today = new Date();
-  const from = new Date(today);
-  from.setMonth(from.getMonth() - lookbackMonths);
-  const fromStr = localDateStr(from);
-  const todayStr = localDateStr(today);
-  const spent = netSpend(getScopedTransactions()
-    .filter(t=> t.date>=fromStr && t.date<=todayStr && txMatchesScope(t,scope)), scope);
-  const monthlyAvg = spent / lookbackMonths;
-  return { total: spent, monthlyAvg, suggested: period==="annual" ? monthlyAvg*12 : monthlyAvg };
+  const scoped = getScopedTransactions();
+  const months = completeHistoryMonths(lookbackMonths, scoped);
+  const monthSet = new Set(months);
+  const byMonth = {};
+  scoped.forEach(t=>{
+    const m = monthKey(t.date);
+    if(monthSet.has(m) && txMatchesScope(t, scope)) (byMonth[m] = byMonth[m] || []).push(t);
+  });
+  const total = months.reduce((s,m)=> s + netSpend(byMonth[m] || [], scope), 0);
+  const monthlyAvg = months.length ? total / months.length : 0;
+  return { total, monthlyAvg, months, suggested: period==="annual" ? monthlyAvg*12 : monthlyAvg };
+}
+function flowWord(scope){ return classifyBudgetFlow(scope) === "revenu" ? "le revenu moyen" : "la dépense moyenne"; }
+function historyExplanation(months, requested){
+  if(!months.length) return "";
+  const base = `sur ${months.length} mois complet(s) (${monthsRangeLabel(months)})`;
+  return months.length < requested ? base + ` — seulement ${months.length} mois d'historique disponible(s) sur les ${requested} demandés` : base;
 }
 
 function suggestBudgetAmount(){
@@ -1702,9 +1749,10 @@ function suggestBudgetAmount(){
   const lookback = parseInt(document.getElementById("budgetLookback").value, 10);
   if(!lookback){ appAlert("Choisissez d'abord une période d'historique à utiliser pour le calcul."); return; }
   const period = document.getElementById("budgetPeriod").value;
-  const { monthlyAvg, suggested } = computeSuggestedAmount(scope, period, lookback);
+  const { monthlyAvg, suggested, months } = computeSuggestedAmount(scope, period, lookback);
+  if(!months.length){ appAlert("Pas encore de mois complet dans l'historique pour calculer une moyenne (le mois en cours n'est pas pris en compte car il n'est pas terminé)."); return; }
   document.getElementById("budgetAmount").value = Math.round(suggested);
-  appAlert(`Sur les ${lookback} dernier(s) mois, la dépense moyenne pour « ${budgetScopeLabel(scope)} » est de ${euro(monthlyAvg)}/mois.\nMontant suggéré (${period==='annual'?'annuel':'mensuel'}) : ${euro(suggested)}. Ajustez si besoin, puis cliquez « Ajouter ».`);
+  appAlert(`${flowWord(scope).replace(/^./, c=>c.toUpperCase())} pour « ${budgetScopeLabel(scope)} » est de ${euro(monthlyAvg)}/mois, ${historyExplanation(months, lookback)}.\nMontant suggéré (${period==='annual'?'annuel':'mensuel'}) : ${euro(suggested)}. Ajustez si besoin, puis cliquez « Ajouter ».`);
 }
 
 function addBudget(){
@@ -1792,10 +1840,11 @@ function recalcBudgetFromHistory(id){
     onConfirm: (v)=>{
       const months = parseInt(v.lookback, 10);
       if(!months || months <= 0){ showModalError("Indiquez un nombre de mois valide (ex. 3, 6, 12)."); return false; }
-      const { monthlyAvg, suggested } = computeSuggestedAmount(b.scope, b.period, months);
+      const { monthlyAvg, suggested, months: used } = computeSuggestedAmount(b.scope, b.period, months);
+      if(!used.length){ showModalError("Pas encore de mois complet dans l'historique pour calculer une moyenne."); return false; }
       openModal({
         title: "Nouveau montant suggéré",
-        message: `Sur les ${months} dernier(s) mois, la moyenne pour « ${budgetScopeLabel(b.scope)} » est de ${euro(monthlyAvg)}/mois.\nMontant ${b.period==='annual'?'annuel':'mensuel'} suggéré : ${euro(suggested)}.\nActuel : ${euro(b.amount)}.`,
+        message: `${flowWord(b.scope).replace(/^./, c=>c.toUpperCase())} pour « ${budgetScopeLabel(b.scope)} » est de ${euro(monthlyAvg)}/mois, ${historyExplanation(used, months)}.\nMontant ${b.period==='annual'?'annuel':'mensuel'} suggéré : ${euro(suggested)}.\nActuel : ${euro(b.amount)}.`,
         confirmLabel: "Appliquer " + euro(Math.round(suggested)),
         cancelLabel: "Annuler",
         onConfirm: ()=>{
@@ -1814,7 +1863,7 @@ function recalcBudgetFromHistory(id){
 function txMatchesScope(t, scope){
   const cat = state.categories.find(c=>c.id===t.categoryId);
   if(!cat) return false;
-  if(scope.type === "group") return (cat.group || cat.name) === scope.value;
+  if(scope.type === "group") return groupKey(cat.group || cat.name) === groupKey(scope.value);
   return cat.id === scope.value;
 }
 
@@ -1926,51 +1975,39 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
 }
 
 /* ---- Bilan individuel d'un budget, avec recommandation d'ajustement ---- */
+/* Bilan d'un budget : moyenne sur les derniers mois complets (3 pour un budget mensuel, 12
+   glissants pour un budget annuel, extrapolés à l'année si l'historique est plus court). */
 function computeBudgetBilan(b){
-  const scoped = getScopedTransactions();
-  const today = new Date();
   const isProv = b.kind === "provision";
-
-  if(b.period === "monthly"){
-    const months = [1,2,3].map(i=>{
-      return localMonthStr(new Date(today.getFullYear(), today.getMonth()-i, 1));
-    });
-    const monthlySpends = months.map(m=> netSpend(scoped
-      .filter(t=>monthKey(t.date)===m && txMatchesScope(t,b.scope)), b.scope));
-    const avg = monthlySpends.reduce((a,c)=>a+c,0) / months.length;
-    const diffPct = b.amount > 0 ? ((avg-b.amount)/b.amount)*100 : 0;
-    let reco;
-    if(isProv){
-      reco = `Moyenne mise de côté ces 3 derniers mois pour cette provision : ${euro(avg)}/mois, pour un objectif de ${euro(b.amount)}/mois.`;
-    }else if(diffPct > 15){
-      reco = `Vos dépenses moyennes des 3 derniers mois (${euro(avg)}/mois) dépassent ce budget d'environ ${Math.round(diffPct)}%. Une augmentation autour de ${euro(avg)} semble plus réaliste.`;
-    }else if(diffPct < -20){
-      reco = `Vos dépenses moyennes des 3 derniers mois (${euro(avg)}/mois) sont nettement en dessous de ce budget. Vous pourriez le réduire à environ ${euro(avg)} pour libérer de la marge ailleurs.`;
-    }else{
-      reco = `Ce budget semble bien calibré : moyenne récente de ${euro(avg)}/mois pour un objectif de ${euro(b.amount)}.`;
-    }
-    return { avg, reco };
-  }else{
-    const lastYear = String(today.getFullYear()-1);
-    const spentLastYear = netSpend(scoped
-      .filter(t=>(t.date||"").slice(0,4)===lastYear && txMatchesScope(t,b.scope)), b.scope);
-    const diffPct = b.amount > 0 ? ((spentLastYear-b.amount)/b.amount)*100 : 0;
-    let reco;
-    if(isProv){
-      reco = spentLastYear>0
-        ? `Provisionné en ${lastYear} : ${euro(spentLastYear)}, pour un objectif de ${euro(b.amount)}.`
-        : `Pas encore d'historique complet en ${lastYear} pour cette provision.`;
-    }else if(spentLastYear === 0){
-      reco = `Pas encore assez d'historique annuel (${lastYear}) pour évaluer ce budget.`;
-    }else if(diffPct > 15){
-      reco = `En ${lastYear}, la dépense réelle était de ${euro(spentLastYear)}, soit environ ${Math.round(diffPct)}% de plus que ce budget. Une augmentation vers ${euro(spentLastYear)} semble plus réaliste.`;
-    }else if(diffPct < -20){
-      reco = `En ${lastYear}, la dépense réelle (${euro(spentLastYear)}) était nettement sous ce budget. Vous pourriez le réduire.`;
-    }else{
-      reco = `Ce budget annuel semble cohérent avec la dépense réelle de ${lastYear} (${euro(spentLastYear)}).`;
-    }
-    return { avg: spentLastYear, reco };
+  const isRevenue = classifyBudgetFlow(b.scope) === "revenu";
+  const noun = isRevenue ? "revenus" : "dépenses";
+  const lookback = b.period === "monthly" ? 3 : 12;
+  const { monthlyAvg, months } = computeSuggestedAmount(b.scope, "monthly", lookback);
+  if(!months.length){
+    return { avg: 0, reco: "Pas encore de mois complet dans l'historique pour évaluer ce budget (le mois en cours n'est pas pris en compte)." };
   }
+  const avg = b.period === "monthly" ? monthlyAvg : monthlyAvg * 12;
+  const unit = b.period === "monthly" ? "/mois" : "/an";
+  const basis = b.period === "monthly"
+    ? `sur ${months.length} mois complet(s) (${monthsRangeLabel(months)})`
+    : (months.length >= 12 ? `sur les 12 derniers mois complets (${monthsRangeLabel(months)})`
+                           : `extrapolé sur 12 mois à partir de ${months.length} mois d'historique (${monthsRangeLabel(months)})`);
+  const diffPct = b.amount > 0 ? ((avg - b.amount) / b.amount) * 100 : 0;
+  let reco;
+  if(isProv){
+    reco = `Montant moyen ${basis} : ${euro(avg)}${unit}, pour un objectif de ${euro(b.amount)}${unit}.`;
+  }else if(isRevenue){
+    reco = Math.abs(diffPct) <= 10
+      ? `Ce budget de revenus est cohérent : ${euro(avg)}${unit} en moyenne ${basis}.`
+      : `Vos revenus moyens ${basis} sont de ${euro(avg)}${unit}, soit environ ${Math.round(Math.abs(diffPct))} % ${diffPct > 0 ? "de plus" : "de moins"} que ce budget. Un ajustement vers ${euro(avg)} serait plus réaliste.`;
+  }else if(diffPct > 15){
+    reco = `Vos ${noun} moyennes ${basis} (${euro(avg)}${unit}) dépassent ce budget d'environ ${Math.round(diffPct)} %. Une augmentation autour de ${euro(avg)} semble plus réaliste.`;
+  }else if(diffPct < -20){
+    reco = `Vos ${noun} moyennes ${basis} (${euro(avg)}${unit}) sont nettement en dessous de ce budget. Vous pourriez le réduire à environ ${euro(avg)} pour libérer de la marge ailleurs.`;
+  }else{
+    reco = `Ce budget semble bien calibré : moyenne de ${euro(avg)}${unit} ${basis}, pour un objectif de ${euro(b.amount)}.`;
+  }
+  return { avg, reco };
 }
 
 function showBudgetBilan(id){
@@ -1986,8 +2023,9 @@ function showBudgetBilan(id){
   openModal({
     title: "Bilan du budget",
     html,
-    confirmLabel: "Appliquer " + euro(Math.round(result.avg)),
+    confirmLabel: result.avg > 0 ? "Appliquer " + euro(Math.round(result.avg)) : "Fermer",
     cancelLabel: "Fermer",
+    hideCancel: !(result.avg > 0),
     onConfirm: ()=>{
       if(result.avg > 0){
         b.amount = Math.round(result.avg);
