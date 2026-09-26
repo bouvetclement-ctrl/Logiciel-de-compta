@@ -77,7 +77,7 @@
   .card .sub{ color:var(--muted); font-size:13px; margin:0 0 16px; }
 
   label{ font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
-  input[type=text], input[type=number], input[type=date], input[type=file], select{
+  input[type=text], input[type=password], input[type=number], input[type=date], input[type=file], select{
     width:100%; background:var(--surface-2); border:1px solid var(--border); color:var(--ink);
     font:inherit; font-size:14px; padding:9px 10px; border-radius:4px;
   }
@@ -127,7 +127,7 @@
     align-items:center; justify-content:center; padding:16px;
   }
   .modal-overlay.open{ display:flex; }
-  .modal-box{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; max-width:420px; width:100%; }
+  .modal-box{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; max-width:440px; width:100%; max-height:92vh; overflow-y:auto; }
   .modal-box h2{ font-family:var(--font-display); font-size:17px; margin:0 0 8px; }
   .modal-box .sub{ margin:0 0 14px; white-space:pre-wrap; }
   .modal-field{ margin-bottom:10px; }
@@ -155,6 +155,12 @@
   label.chk{ display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--ink); cursor:pointer; margin:0; }
   label.chk input{ margin:0; }
   .more-row{ text-align:center; padding:12px 0 4px; }
+  .tx-note{ display:block; font-size:11.5px; color:var(--muted); font-style:italic; }
+  tr.tx-checked td{ opacity:.78; }
+  .stat-row{ display:flex; gap:28px; flex-wrap:wrap; margin-bottom:12px; }
+  .stat-row .v{ font-family:var(--font-mono); font-weight:600; font-size:17px; }
+  .badge-late{ color:var(--terracotta); font-weight:600; }
+  .backup-warn{ color:var(--terracotta); }
 
   .bar-track{ height:9px; background:var(--surface-2); border-radius:5px; overflow:hidden; border:1px solid var(--border); }
   .bar-fill{ height:100%; background:var(--green); }
@@ -225,12 +231,14 @@
     <button data-view="transactions">Transactions</button>
     <button data-view="regles">Règles &amp; catégories</button>
     <button data-view="budget">Budget</button>
+    <button data-view="echeancier">Échéancier</button>
     <button data-view="dashboard">Tableau de bord</button>
   </nav>
 
   <div class="toolbar">
-    <span class="hint" style="margin:0;">Une sauvegarde manuelle reste possible en complément.</span>
+    <span class="hint" id="backupHint" style="margin:0;">Une sauvegarde manuelle reste possible en complément.</span>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn secondary small" id="undoBtn" onclick="undoLastChange()" disabled title="Annuler la dernière modification (Ctrl+Z)">↶ Annuler</button>
       <button class="btn secondary small" onclick="exportBackup()">⭳ Exporter la sauvegarde</button>
       <button class="btn secondary small" onclick="document.getElementById('importBackupFile').click()">⭱ Importer une sauvegarde</button>
       <input type="file" id="importBackupFile" accept="application/json" style="display:none" onchange="importBackup(this.files[0])">
@@ -241,12 +249,12 @@
   <!-- ============ IMPORT ============ -->
   <section class="view active" id="view-import">
     <div class="card">
-      <h2>Importer un relevé bancaire (CSV)</h2>
-      <p class="sub">Exportez vos opérations depuis votre banque au format CSV, puis déposez le fichier ici. Seules les colonnes que vous choisissez (date, libellé, montant) sont importées — le reste n'est jamais lu.</p>
+      <h2>Importer un relevé bancaire (CSV, OFX ou QIF)</h2>
+      <p class="sub">Exportez vos opérations depuis votre banque au format CSV, OFX (« format Money ») ou QIF, puis déposez le fichier ici. Seules les colonnes que vous choisissez (date, libellé, montant) sont importées — le reste n'est jamais lu.</p>
       <div class="drop" id="dropZone">
-        📄 Glissez un fichier CSV ici, ou
+        📄 Glissez un fichier CSV, OFX ou QIF ici, ou
         <label for="csvFile" style="color:var(--green); cursor:pointer; text-decoration:underline;">choisissez-le</label>
-        <input type="file" id="csvFile" accept=".csv,text/csv" style="display:none" onchange="handleFile(this.files[0])">
+        <input type="file" id="csvFile" accept=".csv,.ofx,.qfx,.qif,.txt,text/csv" style="display:none" onchange="handleFile(this.files[0])">
       </div>
       <div id="mappingBox" style="display:none; margin-top:18px;">
         <h2 style="font-size:16px;">Correspondance des colonnes</h2>
@@ -304,6 +312,7 @@
         <div class="toolbar" style="margin:0 0 10px;">
           <h2 style="margin:0; font-size:16px;">Journal des opérations</h2>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn small" onclick="openTxEditor()">＋ Nouvelle opération</button>
             <button class="btn secondary small" onclick="reapplyRules()">📏 Appliquer les règles</button>
             <button class="btn secondary small" onclick="exportCsv()" title="Exporte les opérations affichées (compte et filtres en cours)">⭳ Export CSV</button>
           </div>
@@ -312,13 +321,22 @@
           <div class="field">
             <label>Recherche</label>
             <div style="position:relative;">
-              <input type="text" id="filterSearch" placeholder="Libellé..." oninput="renderTransactions()" style="padding-right:28px;">
+              <input type="text" id="filterSearch" placeholder="Libellé, note ou montant…" oninput="renderTransactions()" style="padding-right:28px;">
               <button type="button" onclick="clearSearchFilter()" title="Effacer la recherche"
                       style="position:absolute; right:4px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:16px; cursor:pointer; padding:2px 6px; line-height:1;">✕</button>
             </div>
           </div>
           <div class="field"><label>Catégorie</label><select id="filterCategory" onchange="renderTransactions()"></select></div>
           <div class="field"><label>Mois</label><select id="filterMonth" onchange="renderTransactions()"></select></div>
+          <div class="field"><label>Du</label><input type="date" id="filterFrom" onchange="renderTransactions()"></div>
+          <div class="field"><label>Au</label><input type="date" id="filterTo" onchange="renderTransactions()"></div>
+          <div class="field"><label>Pointage</label>
+            <select id="filterChecked" onchange="renderTransactions()">
+              <option value="">Toutes</option>
+              <option value="yes">Pointées</option>
+              <option value="no">Non pointées</option>
+            </select>
+          </div>
           <div class="field"><label>Trier par</label>
             <select id="sortBy" onchange="renderTransactions()">
               <option value="date_desc">Date (récent → ancien)</option>
@@ -342,6 +360,8 @@
           <strong id="bulkCount" style="font-size:13px;"></strong>
           <input type="text" id="bulkCategorySelect" list="categoryDatalist" placeholder="Tapez pour rechercher…" style="max-width:220px;">
           <button class="btn small" onclick="bulkAssignCategory()">Assigner la catégorie</button>
+          <button class="btn secondary small" onclick="bulkSetChecked(true)">✓ Pointer</button>
+          <button class="btn secondary small" onclick="bulkSetChecked(false)">Dépointer</button>
           <button class="btn secondary small" onclick="bulkDeleteSelection()">Supprimer la sélection</button>
           <button class="btn secondary small" onclick="clearSelection()">Annuler la sélection</button>
         </div>
@@ -351,13 +371,27 @@
         <table>
           <thead><tr>
             <th><input type="checkbox" id="selectAllChk" onchange="toggleSelectAll(this.checked)" style="width:auto;"></th>
-            <th>Date</th><th>Libellé</th><th class="num">Montant</th><th>Catégorie</th><th>Sous-catégorie</th><th>Origine</th><th></th>
+            <th>Date</th><th>Libellé</th><th class="num">Montant</th><th class="num" id="thBalance" title="Solde du compte après l'opération">Solde</th><th>Catégorie</th><th>Sous-catégorie</th><th>Origine</th><th title="Pointée (vérifiée sur le relevé bancaire)">✓</th><th></th>
           </tr></thead>
           <tbody id="txTable"></tbody>
         </table>
       </div>
       <div id="txMore" class="more-row" style="display:none;"></div>
       <div id="txEmpty" class="empty">Aucune opération. Importez un relevé pour commencer.</div>
+    </div>
+
+    <div class="card" id="reconcileBox">
+      <h2>Rapprochement bancaire</h2>
+      <p class="sub">Comparez le solde calculé ici avec celui affiché par votre banque à une date donnée. S'il y a un écart, une opération manque ou est en trop. Cochez « ✓ » les opérations vérifiées sur le relevé pour suivre ce qui a déjà été contrôlé.</p>
+      <div id="reconcileNeedsAccount" class="hint">Choisissez un compte précis (en haut de la page, « Compte : ») pour faire un rapprochement.</div>
+      <div id="reconcileForm" style="display:none;">
+        <div class="grid-form">
+          <div class="field"><label>Date du relevé</label><input type="date" id="reconcileDate"></div>
+          <div class="field"><label>Solde indiqué par la banque (€)</label><input type="text" id="reconcileBank" placeholder="Ex : 1 234,56"></div>
+          <div class="field" style="align-self:end;"><button class="btn" onclick="runReconciliation()">Comparer</button></div>
+        </div>
+        <div id="reconcileResult"></div>
+      </div>
     </div>
 
     <div class="card" id="importBatchesBox" style="display:none;">
@@ -511,6 +545,70 @@
     </div>
   </section>
 
+  <!-- ============ ECHEANCIER ============ -->
+  <section class="view" id="view-echeancier">
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Prévision de solde</h2>
+        <select id="forecastHorizon" onchange="renderRecurring()" style="max-width:200px;">
+          <option value="eom">Jusqu'à la fin du mois</option>
+          <option value="30">30 prochains jours</option>
+          <option value="90">90 prochains jours</option>
+          <option value="365">12 prochains mois</option>
+        </select>
+      </div>
+      <p class="sub">Solde actuel + opérations récurrentes à venir (pour le compte sélectionné en haut de la page, ou tous les comptes).</p>
+      <div id="forecastBox"></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Libellé</th><th>Compte</th><th class="num">Montant</th><th class="num">Solde prévu</th></tr></thead>
+          <tbody id="forecastTable"></tbody>
+        </table>
+      </div>
+      <div id="forecastEmpty" class="empty">Aucune échéance à venir sur cette période.</div>
+    </div>
+
+    <div class="card">
+      <h2>Opérations récurrentes</h2>
+      <p class="sub">Loyer, salaire, abonnements, impôts… Quand une opération correspondante est importée (même montant, à 5 jours près, et libellé contenant le mot-clé s'il est renseigné), l'échéance passe automatiquement à la suivante.</p>
+      <div class="grid-form">
+        <div class="field"><label>Libellé</label><input type="text" id="recLabel" placeholder="Ex : Loyer"></div>
+        <div class="field"><label>Montant (€, négatif = dépense)</label><input type="text" id="recAmount" placeholder="Ex : -850"></div>
+        <div class="field"><label>Fréquence</label>
+          <select id="recFreq">
+            <option value="monthly">Mensuelle</option>
+            <option value="weekly">Hebdomadaire</option>
+            <option value="quarterly">Trimestrielle</option>
+            <option value="annual">Annuelle</option>
+          </select>
+        </div>
+        <div class="field"><label>Prochaine échéance</label><input type="date" id="recNext"></div>
+        <div class="field"><label>Compte</label><select id="recAccount"></select></div>
+        <div class="field"><label>Catégorie (optionnel)</label><input type="text" id="recCategory" list="categoryDatalist" placeholder="Tapez pour rechercher…"></div>
+        <div class="field"><label>Mot-clé du libellé bancaire (optionnel)</label><input type="text" id="recKeyword" placeholder="Ex : LOYER AGENCE"></div>
+        <div class="field" style="align-self:end;"><button class="btn" onclick="addRecurring()">Ajouter</button></div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Libellé</th><th class="num">Montant</th><th>Fréquence</th><th>Prochaine échéance</th><th>Compte</th><th>Catégorie</th><th></th></tr></thead>
+          <tbody id="recurringTable"></tbody>
+        </table>
+      </div>
+      <div id="recurringEmpty" class="empty">Aucune opération récurrente pour le moment.</div>
+    </div>
+
+    <div class="card" id="recurringSuggestBox" style="display:none;">
+      <h2>Suggestions</h2>
+      <p class="sub">Opérations retrouvées avec le même libellé et le même montant sur au moins 3 mois différents parmi les 6 derniers.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Libellé</th><th class="num">Montant</th><th>Compte</th><th>Mois concernés</th><th></th></tr></thead>
+          <tbody id="recurringSuggestTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ DASHBOARD ============ -->
   <section class="view" id="view-dashboard">
     <div class="card" style="padding:14px 18px;">
@@ -521,6 +619,7 @@
         <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_budgetStatus" onchange="updateDashboardConfig()" style="width:auto;"> État des budgets</label>
         <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_breakdown" onchange="updateDashboardConfig()" style="width:auto;"> Répartition par catégorie</label>
         <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_monthTable" onchange="updateDashboardConfig()" style="width:auto;"> Détail mensuel</label>
+        <label class="chk on" style="display:inline-flex;"><input type="checkbox" id="dashCfg_yearCompare" onchange="updateDashboardConfig()" style="width:auto;"> Comparaison annuelle</label>
       </div>
     </div>
     <div class="card" id="dashCard_monthlyChart">
@@ -575,6 +674,20 @@
         </table>
       </div>
       <div id="monthEmpty" class="empty">Pas encore de données.</div>
+    </div>
+    <div class="card" id="dashCard_yearCompare">
+      <div class="toolbar">
+        <h2 style="margin:0;">Comparaison annuelle</h2>
+        <select id="yearCompareYear" onchange="renderYearCompare()" style="max-width:120px;"></select>
+      </div>
+      <p class="sub" id="yearCompareSub">Dépenses et revenus nets par catégorie principale, comparés à l'année précédente (hors virements internes).</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Catégorie</th><th class="num" id="ycPrevHead">N-1</th><th class="num" id="ycCurHead">N</th><th class="num">Écart</th><th class="num">%</th></tr></thead>
+          <tbody id="yearCompareTable"></tbody>
+        </table>
+      </div>
+      <div id="yearCompareEmpty" class="empty">Pas encore de données.</div>
     </div>
   </section>
 
@@ -700,6 +813,65 @@ function periodLabel(key, freq){
   return fmt(start) + "–" + fmt(end);
 }
 
+/* ---- Import OFX (« format Money », v1 SGML ou v2 XML) et QIF ----
+   Renvoient [{ date:"AAAA-MM-JJ", label, amount:"texte" }] ; les montants restent du texte pour
+   passer par la même lecture (parseFrenchNumber) que les CSV. */
+function decodeXmlEntities(s){
+  return String(s).replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'")
+    .replace(/&#(\d+);/g, (m,n)=>String.fromCharCode(+n)).replace(/&amp;/g,"&");
+}
+function looksLikeOfx(text){ return /<OFX>|OFXHEADER|<STMTTRN>/i.test(text.slice(0, 5000)) || /<STMTTRN>/i.test(text); }
+function looksLikeQif(text){ return /^\s*!(Type|Account|Option)/i.test(text); }
+
+function parseOfx(text){
+  const out = [];
+  const chunks = text.split(/<STMTTRN>/i).slice(1);
+  chunks.forEach(chunk=>{
+    const body = chunk.split(/<\/STMTTRN>|<\/BANKTRANLIST>/i)[0];
+    const tag = (name)=>{
+      const m = body.match(new RegExp("<" + name + ">([^<\\r\\n]*)", "i"));
+      return m ? decodeXmlEntities(m[1].trim()) : "";
+    };
+    const d = tag("DTPOSTED") || tag("DTUSER");
+    const dm = d.match(/^(\d{4})(\d{2})(\d{2})/);
+    const name = tag("NAME"), memo = tag("MEMO");
+    let label = name || memo;
+    if(name && memo && !name.toUpperCase().includes(memo.toUpperCase())) label = name + " " + memo;
+    out.push({ date: dm ? `${dm[1]}-${dm[2]}-${dm[3]}` : "", label: label.replace(/\s+/g," ").trim(), amount: tag("TRNAMT") });
+  });
+  return out;
+}
+
+function parseQif(text){
+  const records = [];
+  let cur = {};
+  text.split(/\r?\n/).forEach(line=>{
+    if(!line) return;
+    const code = line[0], val = line.slice(1).trim();
+    if(code === "^"){ if(cur.D || cur.T || cur.P) records.push(cur); cur = {}; return; }
+    if(code === "!") return;
+    if(code === "D" || code === "T" || code === "U" || code === "P" || code === "M") if(!(code in cur)) cur[code] = val;
+  });
+  if(cur.D || cur.T || cur.P) records.push(cur);
+  // Ordre jour/mois déterminé sur tout le fichier : une valeur > 12 tranche ; sinon ordre français.
+  const parts = records.map(r=> (r.D||"").split(/[\/\-.' ]+/).map(Number));
+  let order = "DMY";
+  if(!parts.some(p=>p[0] > 12) && parts.some(p=>p[1] > 12)) order = "MDY";
+  return records.map((r, i)=>{
+    const p = parts[i];
+    let date = "";
+    if(p.length >= 3 && p.every(n=>!isNaN(n))){
+      const [a, b, y] = p;
+      const yy = y < 100 ? 2000 + y : y;
+      const day = order === "DMY" ? a : b, mon = order === "DMY" ? b : a;
+      const iso = `${yy}-${pad2(mon)}-${pad2(day)}`;
+      date = isValidIsoDate(iso) ? iso : "";
+    }
+    const label = [r.P, r.M].filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+    return { date, label, amount: r.T != null ? r.T : (r.U || "") };
+  });
+}
+
 /* Échappe une valeur pour un CSV séparé par des points-virgules. */
 function csvCell(v){
   const s = String(v == null ? "" : v);
@@ -724,11 +896,7 @@ function openModal({ title="", message="", html="", fields=[], confirmLabel="OK"
   bodyHtmlEl.innerHTML = html;
   bodyHtmlEl.style.display = html ? "block" : "none";
   const fieldsBox = document.getElementById("modalFields");
-  fieldsBox.innerHTML = fields.map(f=>`
-    <div class="modal-field">
-      ${f.label ? `<label>${escapeHtml(f.label)}</label>` : ""}
-      <input type="text" id="modalField_${f.id}" ${f.list ? `list="${f.list}"` : ""} placeholder="${escapeHtml(f.placeholder||"")}" value="${escapeHtml(f.value!=null?f.value:"")}">
-    </div>`).join("");
+  fieldsBox.innerHTML = fields.map(renderModalField).join("");
   const errEl = document.getElementById("modalError");
   errEl.textContent = ""; errEl.style.display = "none";
   const okBtn = document.getElementById("modalOkBtn");
@@ -745,6 +913,21 @@ function closeModal(){
   document.getElementById("modalOverlay").classList.remove("open");
   modalState = null;
 }
+/* Champ de fenêtre de dialogue : text (défaut), date, select (f.options = [{value,label}]) ou checkbox. */
+function renderModalField(f){
+  const id = "modalField_" + f.id;
+  const val = f.value != null ? f.value : "";
+  let input;
+  if(f.type === "select"){
+    input = `<select id="${id}">${(f.options||[]).map(o=>
+      `<option value="${escapeHtml(o.value)}" ${String(o.value)===String(val)?"selected":""}>${escapeHtml(o.label)}</option>`).join("")}</select>`;
+  }else if(f.type === "checkbox"){
+    return `<div class="modal-field"><label class="chk"><input type="checkbox" id="${id}" style="width:auto;" ${val?"checked":""}> ${escapeHtml(f.label||"")}</label></div>`;
+  }else{
+    input = `<input type="${f.type==="date"?"date":"text"}" id="${id}" ${f.list ? `list="${f.list}"` : ""} placeholder="${escapeHtml(f.placeholder||"")}" value="${escapeHtml(val)}">`;
+  }
+  return `<div class="modal-field">${f.label ? `<label for="${id}">${escapeHtml(f.label)}</label>` : ""}${input}</div>`;
+}
 function isModalOpen(){ return document.getElementById("modalOverlay").classList.contains("open"); }
 function modalCancel(){
   const cb = modalState && modalState.onCancel;
@@ -760,7 +943,7 @@ function modalOk(){
   if(!modalState) return;
   const current = modalState;
   const values = {};
-  current.fields.forEach(f=>{ const el = document.getElementById("modalField_"+f.id); if(el) values[f.id] = el.value; });
+  current.fields.forEach(f=>{ const el = document.getElementById("modalField_"+f.id); if(el) values[f.id] = f.type === "checkbox" ? el.checked : el.value; });
   const result = current.onConfirm ? current.onConfirm(values) : true;
   // Ne ferme pas une nouvelle fenêtre ouverte par le callback lui-même.
   if(result !== false && modalState === current) closeModal();
@@ -810,7 +993,7 @@ function defaultCategories(){
   ];
 }
 function defaultDashboardConfig(){
-  return { monthlyChart:true, categoryChart:true, budgetStatus:true, breakdown:true, monthTable:true };
+  return { monthlyChart:true, categoryChart:true, budgetStatus:true, breakdown:true, monthTable:true, yearCompare:true };
 }
 function defaultState(){
   return {
@@ -818,7 +1001,8 @@ function defaultState(){
     categories: defaultCategories(), rules: [], transactions: [], imports: [],
     accounts: [{ id: uid(), name: "Compte personnel" }],
     openingBalances: {},
-    budgets: [], dashboardConfig: defaultDashboardConfig()
+    budgets: [], dashboardConfig: defaultDashboardConfig(),
+    recurring: [], reconciliations: {}
   };
 }
 
@@ -848,18 +1032,26 @@ function sanitizeIds(s){
     t.batchId = fix(batchMap, t.batchId);
   });
   s.imports.forEach(b=>{ b.accountId = fix(accMap, b.accountId); });
+  remap(s.recurring, r=>{
+    r.categoryId = fix(catMap, r.categoryId); if(r.categoryId && !isSafeId(r.categoryId)) r.categoryId = "";
+    r.accountId = fix(accMap, r.accountId); if(r.accountId && !isSafeId(r.accountId)) r.accountId = "";
+  });
   const ob = {};
   Object.keys(s.openingBalances || {}).forEach(k=>{ const nk = fix(accMap, k); if(isSafeId(nk)) ob[nk] = s.openingBalances[k]; });
   s.openingBalances = ob;
+  const rc = {};
+  Object.keys(s.reconciliations || {}).forEach(k=>{ const nk = fix(accMap, k); if(isSafeId(nk)) rc[nk] = s.reconciliations[k]; });
+  s.reconciliations = rc;
 }
 
 /* Corrige/complète les données anciennes : comptes manquants, opérations sans compte,
    ancien solde initial unique à répartir sur le premier compte, identifiants invalides. */
 function migrateState(s){
-  ["categories","rules","transactions","imports","accounts","budgets"].forEach(k=>{
+  ["categories","rules","transactions","imports","accounts","budgets","recurring"].forEach(k=>{
     s[k] = Array.isArray(s[k]) ? s[k].filter(x=>x && typeof x === "object") : [];
   });
   if(!s.openingBalances || typeof s.openingBalances !== "object") s.openingBalances = {};
+  if(!s.reconciliations || typeof s.reconciliations !== "object" || Array.isArray(s.reconciliations)) s.reconciliations = {};
   // Ne JAMAIS écarter une opération : un montant stocké en texte (ex. par un script Google qui
   // passe par une feuille de calcul) est converti ; un montant illisible devient 0.
   s.transactions.forEach(t=>{
@@ -871,6 +1063,17 @@ function migrateState(s){
     t.date = isValidIsoDate(t.date) ? t.date : (parseFlexDate(t.date) || "");
     if(t.source === "ai") t.source = "manual"; // ancienne origine « IA », jamais réellement utilisée
     delete t.hash;
+    if(t.note != null) t.note = String(t.note);
+    t.checked = !!t.checked;
+  });
+  s.recurring.forEach(r=>{
+    r.label = String(r.label == null ? "" : r.label);
+    r.keyword = String(r.keyword == null ? "" : r.keyword);
+    const v = typeof r.amount === "number" ? r.amount : parseFrenchNumber(r.amount);
+    r.amount = isFinite(v) ? v : 0;
+    if(!["weekly","monthly","quarterly","annual"].includes(r.frequency)) r.frequency = "monthly";
+    if(!isValidIsoDate(r.nextDate)) r.nextDate = localDateStr();
+    r.day = parseInt(r.day, 10) || parseInt(r.nextDate.slice(8,10), 10);
   });
   s.categories.forEach(c=>{ c.name = String(c.name == null ? "" : c.name); if(c.group != null) c.group = String(c.group); });
   s.accounts.forEach(a=>{ a.name = String(a.name == null ? "" : a.name); });
@@ -883,6 +1086,7 @@ function migrateState(s){
   }
   const defaultAccId = s.accounts[0].id;
   (s.transactions||[]).forEach(t=>{ if(!t.accountId) t.accountId = defaultAccId; });
+  s.recurring.forEach(r=>{ if(!r.accountId || !s.accounts.some(a=>a.id===r.accountId)) r.accountId = defaultAccId; });
   if(!s.openingBalances) s.openingBalances = {};
   if(s.openingBalance && Object.keys(s.openingBalances).length === 0){
     s.openingBalances[defaultAccId] = s.openingBalance;
@@ -904,8 +1108,27 @@ function serializeState(){
   return {
     famTitle: state.famTitle, categories: state.categories, rules: state.rules, transactions: state.transactions, imports: state.imports,
     accounts: state.accounts, openingBalances: state.openingBalances, budgets: state.budgets, dashboardConfig: state.dashboardConfig,
+    recurring: state.recurring, reconciliations: state.reconciliations,
     updatedAt: state.updatedAt || 0
   };
+}
+
+/* Copie dans `state` les champs valides d'une source (Drive, sauvegarde annulée…). Un champ
+   absent de la source (ex. version plus ancienne de l'appli sur un autre appareil) est conservé. */
+function assignStateFrom(src){
+  if(typeof src.famTitle === "string" && src.famTitle.trim()) state.famTitle = src.famTitle;
+  if(Array.isArray(src.categories) && src.categories.length) state.categories = src.categories;
+  if(Array.isArray(src.rules)) state.rules = src.rules;
+  if(Array.isArray(src.transactions)) state.transactions = src.transactions;
+  if(Array.isArray(src.imports)) state.imports = src.imports;
+  if(Array.isArray(src.accounts) && src.accounts.length) state.accounts = src.accounts;
+  if(src.openingBalances && typeof src.openingBalances === "object") state.openingBalances = src.openingBalances;
+  if(src.openingBalance) state.openingBalance = src.openingBalance;
+  if(Array.isArray(src.budgets)) state.budgets = src.budgets;
+  if(src.dashboardConfig && typeof src.dashboardConfig === "object") state.dashboardConfig = src.dashboardConfig;
+  if(Array.isArray(src.recurring)) state.recurring = src.recurring;
+  if(src.reconciliations && typeof src.reconciliations === "object") state.reconciliations = src.reconciliations;
+  migrateState(state);
 }
 function saveLocal(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState())); }catch(e){}
@@ -940,6 +1163,8 @@ function setDirty(v){ localDirty = !!v; lsSet(DIRTY_KEY, localDirty ? "1" : "0")
 
 function initStorage(){
   famTitleInput.value = state.famTitle;
+  if(matchRecurringWithTransactions()) saveLocal();
+  resetUndoHistory();
   renderAll();
 
   scriptUrl = lsGet(SCRIPT_URL_KEY) || "";
@@ -1039,17 +1264,8 @@ function remoteChangedSince(remote){
 }
 
 function applyRemote(remote){
-  state.famTitle = remote.famTitle || state.famTitle;
-  if(Array.isArray(remote.categories) && remote.categories.length) state.categories = remote.categories;
-  if(Array.isArray(remote.rules)) state.rules = remote.rules;
-  if(Array.isArray(remote.transactions)) state.transactions = remote.transactions;
-  if(Array.isArray(remote.imports)) state.imports = remote.imports;
-  if(Array.isArray(remote.accounts) && remote.accounts.length) state.accounts = remote.accounts;
-  if(remote.openingBalances && typeof remote.openingBalances === "object") state.openingBalances = remote.openingBalances;
-  if(remote.openingBalance) state.openingBalance = remote.openingBalance;
-  if(Array.isArray(remote.budgets)) state.budgets = remote.budgets;
-  if(remote.dashboardConfig) state.dashboardConfig = remote.dashboardConfig;
-  migrateState(state);
+  assignStateFrom(remote);
+  resetUndoHistory(); // on n'annule pas au-delà d'une version reçue d'un autre appareil
   state.updatedAt = remote.updatedAt || 0;
   setLastSyncedAt(remote.updatedAt || Date.now());
   setDirty(false);
@@ -1171,6 +1387,7 @@ async function flushPendingPersist(){
 }
 
 function schedulePersist(){
+  recordUndoPoint();
   state.updatedAt = Date.now();
   setDirty(true);
   saveLocal();
@@ -1178,6 +1395,56 @@ function schedulePersist(){
   clearTimeout(persistTimer);
   persistTimer = setTimeout(()=>{ persistTimer = null; doPersistWrite(); }, 1200);
 }
+
+/* ---------------- Annuler (Ctrl+Z) ----------------
+   Chaque enregistrement mémorise l'état précédent (15 derniers). Filet de sécurité contre une
+   suppression, un import ou une réinitialisation malheureux. */
+const UNDO_LIMIT = 15;
+let undoStack = [];
+let undoBaseline = null;
+let undoRestoring = false;
+
+function snapshotState(){ return JSON.stringify(Object.assign(serializeState(), { updatedAt: 0 })); }
+function resetUndoHistory(){
+  undoStack = [];
+  undoBaseline = snapshotState();
+  updateUndoButton();
+}
+function recordUndoPoint(){
+  const current = snapshotState();
+  if(!undoRestoring && undoBaseline !== null && current !== undoBaseline){
+    undoStack.push(undoBaseline);
+    if(undoStack.length > UNDO_LIMIT) undoStack.shift();
+  }
+  undoBaseline = current;
+  updateUndoButton();
+}
+function updateUndoButton(){
+  const btn = document.getElementById("undoBtn");
+  if(!btn) return;
+  btn.disabled = undoStack.length === 0;
+  btn.title = undoStack.length
+    ? `Annuler la dernière modification (Ctrl+Z) — ${undoStack.length} étape(s) disponible(s)`
+    : "Rien à annuler";
+}
+function undoLastChange(){
+  if(!undoStack.length) return;
+  const previous = JSON.parse(undoStack.pop());
+  closeCategoryPicker();
+  assignStateFrom(previous);
+  undoRestoring = true;
+  try{ schedulePersist(); }finally{ undoRestoring = false; }
+  famTitleInput.value = state.famTitle;
+  renderAll();
+  updateUndoButton();
+}
+document.addEventListener("keydown", (e)=>{
+  if(!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== "z") return;
+  const tag = (e.target && e.target.tagName) || "";
+  if(tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || isModalOpen()) return; // laisse l'annulation native des champs
+  e.preventDefault();
+  undoLastChange();
+});
 
 /* ---------------- Navigation ---------------- */
 const ACTIVE_TAB_KEY = "familyBudget_activeTab";
@@ -1192,6 +1459,7 @@ function activateTab(view){
   if(view === "dashboard") requestAnimationFrame(()=> requestAnimationFrame(renderDashboard));
   if(view === "transactions") renderTransactions();
   if(view === "budget") renderBudgets();
+  if(view === "echeancier") renderRecurring();
   try{ localStorage.setItem(ACTIVE_TAB_KEY, view); }catch(e){}
 }
 
@@ -1244,6 +1512,7 @@ function removeCategory(id){
       state.rules = state.rules.filter(r=>r.categoryId!==id);
       state.budgets = state.budgets.filter(b=>!(b.scope.type==="category" && b.scope.value===id));
       state.transactions.forEach(t=>{ if(t.categoryId===id){ t.categoryId=""; t.source=""; } });
+      state.recurring.forEach(r=>{ if(r.categoryId===id) r.categoryId = ""; });
       schedulePersist();
       renderAll();
     },
@@ -1363,7 +1632,9 @@ function removeAccount(id){
       state.transactions = state.transactions.filter(t=>t.accountId!==id);
       state.accounts = state.accounts.filter(a=>a.id!==id);
       state.imports = state.imports.filter(b=>b.accountId!==id);
+      state.recurring = state.recurring.filter(r=>r.accountId!==id);
       delete state.openingBalances[id];
+      delete state.reconciliations[id];
       schedulePersist();
       renderAll();
     },
@@ -1372,10 +1643,46 @@ function removeAccount(id){
 }
 
 /* ---------------- Budget ---------------- */
+/* Clé de comparaison d'une catégorie principale : « Alimentation », « ALIMENTATION » et
+   « Alimentation  » (espace en trop, souvent créée par un import CSV) sont la même. */
+function groupKey(name){
+  return String(name||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
+}
 function uniqueScopeGroups(){
-  const set = new Set();
-  state.categories.forEach(c=> set.add(c.group || c.name));
-  return Array.from(set).sort((a,b)=>a.localeCompare(b,"fr"));
+  const byKey = new Map();
+  state.categories.forEach(c=>{
+    const name = String(c.group || c.name).trim();
+    const k = groupKey(name);
+    if(k && !byKey.has(k)) byKey.set(k, name);
+  });
+  return Array.from(byKey.values()).sort((a,b)=>a.localeCompare(b,"fr"));
+}
+
+/* Mois COMPLETS utilisés pour une moyenne : les `lookback` mois qui précèdent le mois en cours
+   (jamais un mois entamé, sinon la moyenne dépend du jour du calcul), limités à ceux couverts par
+   l'historique (sinon on divise par 12 alors qu'il n'y a que 3 mois de données). Le premier mois
+   de l'historique n'est retenu que s'il commence dans la première semaine. */
+function completeHistoryMonths(lookback, txs){
+  const dates = txs.map(t=>t.date).filter(Boolean).sort();
+  if(!dates.length) return [];
+  const first = dates[0];
+  const firstMonth = first.slice(0,7);
+  const firstCounts = parseInt(first.slice(8,10), 10) <= 7;
+  const now = new Date();
+  const months = [];
+  for(let i = 1; i <= lookback; i++){
+    const m = localMonthStr(new Date(now.getFullYear(), now.getMonth() - i, 1));
+    if(m > firstMonth || (m === firstMonth && firstCounts)) months.push(m);
+  }
+  return months.reverse();
+}
+function monthLabelFr(m){
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(y, mo-1, 1).toLocaleDateString("fr-FR", { month:"long", year:"numeric" });
+}
+function monthsRangeLabel(months){
+  if(!months.length) return "";
+  return months.length === 1 ? monthLabelFr(months[0]) : monthLabelFr(months[0]) + " → " + monthLabelFr(months[months.length-1]);
 }
 
 function renderBudgetScopeOptions(){
@@ -1405,24 +1712,35 @@ function resolveScopeFromForm(){
   const searchVal = document.getElementById("budgetScopeSearch").value.trim();
   if(!searchVal){ appAlert("Choisissez une catégorie principale ou une sous-catégorie."); return null; }
   if(scopeType === "group"){
-    if(!uniqueScopeGroups().includes(searchVal)){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return null; }
-    return { type:"group", value: searchVal };
+    const match = uniqueScopeGroups().find(g=>groupKey(g) === groupKey(searchVal));
+    if(!match){ appAlert("Catégorie principale inconnue : « " + searchVal + " »."); return null; }
+    return { type:"group", value: match };
   }
   const cat = findCategoryByLabel(searchVal);
   if(!cat){ appAlert("Sous-catégorie inconnue : « " + searchVal + " »."); return null; }
   return { type:"category", value: cat.id };
 }
 
+/* Moyenne mensuelle d'une portée sur les derniers mois complets. Le net est calculé mois par
+   mois (un remboursement compense la dépense du même mois) puis moyenné. */
 function computeSuggestedAmount(scope, period, lookbackMonths){
-  const today = new Date();
-  const from = new Date(today);
-  from.setMonth(from.getMonth() - lookbackMonths);
-  const fromStr = localDateStr(from);
-  const todayStr = localDateStr(today);
-  const spent = netSpend(getScopedTransactions()
-    .filter(t=> t.date>=fromStr && t.date<=todayStr && txMatchesScope(t,scope)), scope);
-  const monthlyAvg = spent / lookbackMonths;
-  return { total: spent, monthlyAvg, suggested: period==="annual" ? monthlyAvg*12 : monthlyAvg };
+  const scoped = getScopedTransactions();
+  const months = completeHistoryMonths(lookbackMonths, scoped);
+  const monthSet = new Set(months);
+  const byMonth = {};
+  scoped.forEach(t=>{
+    const m = monthKey(t.date);
+    if(monthSet.has(m) && txMatchesScope(t, scope)) (byMonth[m] = byMonth[m] || []).push(t);
+  });
+  const total = months.reduce((s,m)=> s + netSpend(byMonth[m] || [], scope), 0);
+  const monthlyAvg = months.length ? total / months.length : 0;
+  return { total, monthlyAvg, months, suggested: period==="annual" ? monthlyAvg*12 : monthlyAvg };
+}
+function flowWord(scope){ return classifyBudgetFlow(scope) === "revenu" ? "le revenu moyen" : "la dépense moyenne"; }
+function historyExplanation(months, requested){
+  if(!months.length) return "";
+  const base = `sur ${months.length} mois complet(s) (${monthsRangeLabel(months)})`;
+  return months.length < requested ? base + ` — seulement ${months.length} mois d'historique disponible(s) sur les ${requested} demandés` : base;
 }
 
 function suggestBudgetAmount(){
@@ -1431,9 +1749,10 @@ function suggestBudgetAmount(){
   const lookback = parseInt(document.getElementById("budgetLookback").value, 10);
   if(!lookback){ appAlert("Choisissez d'abord une période d'historique à utiliser pour le calcul."); return; }
   const period = document.getElementById("budgetPeriod").value;
-  const { monthlyAvg, suggested } = computeSuggestedAmount(scope, period, lookback);
+  const { monthlyAvg, suggested, months } = computeSuggestedAmount(scope, period, lookback);
+  if(!months.length){ appAlert("Pas encore de mois complet dans l'historique pour calculer une moyenne (le mois en cours n'est pas pris en compte car il n'est pas terminé)."); return; }
   document.getElementById("budgetAmount").value = Math.round(suggested);
-  appAlert(`Sur les ${lookback} dernier(s) mois, la dépense moyenne pour « ${budgetScopeLabel(scope)} » est de ${euro(monthlyAvg)}/mois.\nMontant suggéré (${period==='annual'?'annuel':'mensuel'}) : ${euro(suggested)}. Ajustez si besoin, puis cliquez « Ajouter ».`);
+  appAlert(`${flowWord(scope).replace(/^./, c=>c.toUpperCase())} pour « ${budgetScopeLabel(scope)} » est de ${euro(monthlyAvg)}/mois, ${historyExplanation(months, lookback)}.\nMontant suggéré (${period==='annual'?'annuel':'mensuel'}) : ${euro(suggested)}. Ajustez si besoin, puis cliquez « Ajouter ».`);
 }
 
 function addBudget(){
@@ -1521,10 +1840,11 @@ function recalcBudgetFromHistory(id){
     onConfirm: (v)=>{
       const months = parseInt(v.lookback, 10);
       if(!months || months <= 0){ showModalError("Indiquez un nombre de mois valide (ex. 3, 6, 12)."); return false; }
-      const { monthlyAvg, suggested } = computeSuggestedAmount(b.scope, b.period, months);
+      const { monthlyAvg, suggested, months: used } = computeSuggestedAmount(b.scope, b.period, months);
+      if(!used.length){ showModalError("Pas encore de mois complet dans l'historique pour calculer une moyenne."); return false; }
       openModal({
         title: "Nouveau montant suggéré",
-        message: `Sur les ${months} dernier(s) mois, la moyenne pour « ${budgetScopeLabel(b.scope)} » est de ${euro(monthlyAvg)}/mois.\nMontant ${b.period==='annual'?'annuel':'mensuel'} suggéré : ${euro(suggested)}.\nActuel : ${euro(b.amount)}.`,
+        message: `${flowWord(b.scope).replace(/^./, c=>c.toUpperCase())} pour « ${budgetScopeLabel(b.scope)} » est de ${euro(monthlyAvg)}/mois, ${historyExplanation(used, months)}.\nMontant ${b.period==='annual'?'annuel':'mensuel'} suggéré : ${euro(suggested)}.\nActuel : ${euro(b.amount)}.`,
         confirmLabel: "Appliquer " + euro(Math.round(suggested)),
         cancelLabel: "Annuler",
         onConfirm: ()=>{
@@ -1543,7 +1863,7 @@ function recalcBudgetFromHistory(id){
 function txMatchesScope(t, scope){
   const cat = state.categories.find(c=>c.id===t.categoryId);
   if(!cat) return false;
-  if(scope.type === "group") return (cat.group || cat.name) === scope.value;
+  if(scope.type === "group") return groupKey(cat.group || cat.name) === groupKey(scope.value);
   return cat.id === scope.value;
 }
 
@@ -1655,51 +1975,39 @@ function computeBudgetTrackingHTML(selMonth, selYear, txs){
 }
 
 /* ---- Bilan individuel d'un budget, avec recommandation d'ajustement ---- */
+/* Bilan d'un budget : moyenne sur les derniers mois complets (3 pour un budget mensuel, 12
+   glissants pour un budget annuel, extrapolés à l'année si l'historique est plus court). */
 function computeBudgetBilan(b){
-  const scoped = getScopedTransactions();
-  const today = new Date();
   const isProv = b.kind === "provision";
-
-  if(b.period === "monthly"){
-    const months = [1,2,3].map(i=>{
-      return localMonthStr(new Date(today.getFullYear(), today.getMonth()-i, 1));
-    });
-    const monthlySpends = months.map(m=> netSpend(scoped
-      .filter(t=>monthKey(t.date)===m && txMatchesScope(t,b.scope)), b.scope));
-    const avg = monthlySpends.reduce((a,c)=>a+c,0) / months.length;
-    const diffPct = b.amount > 0 ? ((avg-b.amount)/b.amount)*100 : 0;
-    let reco;
-    if(isProv){
-      reco = `Moyenne mise de côté ces 3 derniers mois pour cette provision : ${euro(avg)}/mois, pour un objectif de ${euro(b.amount)}/mois.`;
-    }else if(diffPct > 15){
-      reco = `Vos dépenses moyennes des 3 derniers mois (${euro(avg)}/mois) dépassent ce budget d'environ ${Math.round(diffPct)}%. Une augmentation autour de ${euro(avg)} semble plus réaliste.`;
-    }else if(diffPct < -20){
-      reco = `Vos dépenses moyennes des 3 derniers mois (${euro(avg)}/mois) sont nettement en dessous de ce budget. Vous pourriez le réduire à environ ${euro(avg)} pour libérer de la marge ailleurs.`;
-    }else{
-      reco = `Ce budget semble bien calibré : moyenne récente de ${euro(avg)}/mois pour un objectif de ${euro(b.amount)}.`;
-    }
-    return { avg, reco };
-  }else{
-    const lastYear = String(today.getFullYear()-1);
-    const spentLastYear = netSpend(scoped
-      .filter(t=>(t.date||"").slice(0,4)===lastYear && txMatchesScope(t,b.scope)), b.scope);
-    const diffPct = b.amount > 0 ? ((spentLastYear-b.amount)/b.amount)*100 : 0;
-    let reco;
-    if(isProv){
-      reco = spentLastYear>0
-        ? `Provisionné en ${lastYear} : ${euro(spentLastYear)}, pour un objectif de ${euro(b.amount)}.`
-        : `Pas encore d'historique complet en ${lastYear} pour cette provision.`;
-    }else if(spentLastYear === 0){
-      reco = `Pas encore assez d'historique annuel (${lastYear}) pour évaluer ce budget.`;
-    }else if(diffPct > 15){
-      reco = `En ${lastYear}, la dépense réelle était de ${euro(spentLastYear)}, soit environ ${Math.round(diffPct)}% de plus que ce budget. Une augmentation vers ${euro(spentLastYear)} semble plus réaliste.`;
-    }else if(diffPct < -20){
-      reco = `En ${lastYear}, la dépense réelle (${euro(spentLastYear)}) était nettement sous ce budget. Vous pourriez le réduire.`;
-    }else{
-      reco = `Ce budget annuel semble cohérent avec la dépense réelle de ${lastYear} (${euro(spentLastYear)}).`;
-    }
-    return { avg: spentLastYear, reco };
+  const isRevenue = classifyBudgetFlow(b.scope) === "revenu";
+  const noun = isRevenue ? "revenus" : "dépenses";
+  const lookback = b.period === "monthly" ? 3 : 12;
+  const { monthlyAvg, months } = computeSuggestedAmount(b.scope, "monthly", lookback);
+  if(!months.length){
+    return { avg: 0, reco: "Pas encore de mois complet dans l'historique pour évaluer ce budget (le mois en cours n'est pas pris en compte)." };
   }
+  const avg = b.period === "monthly" ? monthlyAvg : monthlyAvg * 12;
+  const unit = b.period === "monthly" ? "/mois" : "/an";
+  const basis = b.period === "monthly"
+    ? `sur ${months.length} mois complet(s) (${monthsRangeLabel(months)})`
+    : (months.length >= 12 ? `sur les 12 derniers mois complets (${monthsRangeLabel(months)})`
+                           : `extrapolé sur 12 mois à partir de ${months.length} mois d'historique (${monthsRangeLabel(months)})`);
+  const diffPct = b.amount > 0 ? ((avg - b.amount) / b.amount) * 100 : 0;
+  let reco;
+  if(isProv){
+    reco = `Montant moyen ${basis} : ${euro(avg)}${unit}, pour un objectif de ${euro(b.amount)}${unit}.`;
+  }else if(isRevenue){
+    reco = Math.abs(diffPct) <= 10
+      ? `Ce budget de revenus est cohérent : ${euro(avg)}${unit} en moyenne ${basis}.`
+      : `Vos revenus moyens ${basis} sont de ${euro(avg)}${unit}, soit environ ${Math.round(Math.abs(diffPct))} % ${diffPct > 0 ? "de plus" : "de moins"} que ce budget. Un ajustement vers ${euro(avg)} serait plus réaliste.`;
+  }else if(diffPct > 15){
+    reco = `Vos ${noun} moyennes ${basis} (${euro(avg)}${unit}) dépassent ce budget d'environ ${Math.round(diffPct)} %. Une augmentation autour de ${euro(avg)} semble plus réaliste.`;
+  }else if(diffPct < -20){
+    reco = `Vos ${noun} moyennes ${basis} (${euro(avg)}${unit}) sont nettement en dessous de ce budget. Vous pourriez le réduire à environ ${euro(avg)} pour libérer de la marge ailleurs.`;
+  }else{
+    reco = `Ce budget semble bien calibré : moyenne de ${euro(avg)}${unit} ${basis}, pour un objectif de ${euro(b.amount)}.`;
+  }
+  return { avg, reco };
 }
 
 function showBudgetBilan(id){
@@ -1715,8 +2023,9 @@ function showBudgetBilan(id){
   openModal({
     title: "Bilan du budget",
     html,
-    confirmLabel: "Appliquer " + euro(Math.round(result.avg)),
+    confirmLabel: result.avg > 0 ? "Appliquer " + euro(Math.round(result.avg)) : "Fermer",
     cancelLabel: "Fermer",
+    hideCancel: !(result.avg > 0),
     onConfirm: ()=>{
       if(result.avg > 0){
         b.amount = Math.round(result.avg);
@@ -1985,10 +2294,24 @@ function handleFile(file){
   const reader = new FileReader();
   reader.onload = (e)=>{
     const text = decodeCsvBuffer(e.target.result);
-    parseCsvText(text);
+    if(looksLikeOfx(text)) loadStructuredRows(parseOfx(text), "OFX");
+    else if(looksLikeQif(text)) loadStructuredRows(parseQif(text), "QIF");
+    else parseCsvText(text);
   };
-  reader.onerror = ()=> appAlert("Impossible de lire ce fichier CSV.");
+  reader.onerror = ()=> appAlert("Impossible de lire ce fichier.");
   reader.readAsArrayBuffer(file);
+}
+
+/* OFX / QIF : colonnes déjà connues, on passe par le même écran de vérification que les CSV
+   (aperçu, doublons, opérations absentes, choix du compte). */
+function loadStructuredRows(rows, format){
+  if(!rows.length){ appAlert(`Aucune opération trouvée dans ce fichier ${format}.`); return; }
+  parsedHeaders = ["Date","Libellé","Montant"];
+  parsedRows = rows.map(r=>({ "Date": r.date, "Libellé": r.label, "Montant": r.amount }));
+  const hint = document.getElementById("importPreambleHint");
+  hint.style.display = "block";
+  hint.textContent = `Fichier ${format} reconnu : ${rows.length} opération(s). Colonnes remplies automatiquement.`;
+  showMapping();
 }
 
 function parseCsvText(text){
@@ -2279,6 +2602,7 @@ function confirmImport(){
     const accName = (state.accounts.find(a=>a.id===accountId)||{}).name || "";
     state.imports.unshift({ id: batchId, fileName: currentImportFileName, importedAt: new Date().toISOString(), count: added, accountId, accountName: accName });
   }
+  if(added > 0) matchRecurringWithTransactions();
   if(state.categories.length !== categoriesBefore || added > 0) schedulePersist();
   parsedRows = null;
   duplicateMatches = [];
@@ -2489,21 +2813,49 @@ function sortRows(rows, sortBy){
 
 /* Opérations du compte sélectionné, filtrées et triées comme dans le journal (utilisé aussi par l'export CSV). */
 function getFilteredTransactions(){
-  const search = (document.getElementById("filterSearch").value||"").toLowerCase();
+  const searchRaw = (document.getElementById("filterSearch").value||"").trim();
+  const search = searchRaw.toLowerCase();
   const catFilter = document.getElementById("filterCategory").value;
   const monthFilter = document.getElementById("filterMonth").value;
+  const from = document.getElementById("filterFrom").value;
+  const to = document.getElementById("filterTo").value;
+  const checkedFilter = document.getElementById("filterChecked").value;
   const sortBy = document.getElementById("sortBy").value;
   const groupByMonth = document.getElementById("groupByMonth").checked;
   const onlyUncategorized = document.getElementById("onlyUncategorized").checked;
 
   let rows = getScopedTransactions();
-  if(search) rows = rows.filter(t=>t.label.toLowerCase().includes(search));
+  if(search){
+    // Un nombre tapé cherche aussi le montant (au signe près) : « 42,90 » retrouve −42,90 €.
+    const asAmount = /\d/.test(searchRaw) ? parseFrenchNumber(searchRaw) : NaN;
+    rows = rows.filter(t=> t.label.toLowerCase().includes(search)
+      || (t.note && t.note.toLowerCase().includes(search))
+      || (!isNaN(asAmount) && Math.abs(Math.abs(t.amount) - Math.abs(asAmount)) < 0.005));
+  }
   if(onlyUncategorized) rows = rows.filter(t=>!t.categoryId);
   else if(catFilter === "__none__") rows = rows.filter(t=>!t.categoryId);
   else if(catFilter) rows = rows.filter(t=>t.categoryId === catFilter);
   if(monthFilter) rows = rows.filter(t=>monthKey(t.date) === monthFilter);
+  if(from) rows = rows.filter(t=>t.date && t.date >= from);
+  if(to) rows = rows.filter(t=>t.date && t.date <= to);
+  if(checkedFilter === "yes") rows = rows.filter(t=>t.checked);
+  else if(checkedFilter === "no") rows = rows.filter(t=>!t.checked);
   // Le regroupement force un tri par date pour que les mois restent contigus.
   return sortRows(rows, groupByMonth ? "date_desc" : sortBy);
+}
+
+/* Solde du compte après chaque opération (id → solde), depuis le solde initial. Les opérations
+   antérieures à la date du solde initial n'ont pas de solde (elles sont déjà comptées dedans). */
+function runningBalances(accId){
+  const ob = state.openingBalances[accId] || { date:"", amount:0 };
+  const txs = state.transactions
+    .map((t, i)=>({ t, i }))
+    .filter(x=> x.t.accountId === accId && x.t.date && (!ob.date || x.t.date >= ob.date))
+    .sort((a,b)=> a.t.date.localeCompare(b.t.date) || a.i - b.i);
+  const map = new Map();
+  let bal = ob.amount || 0;
+  txs.forEach(x=>{ bal += x.t.amount; map.set(x.t.id, bal); });
+  return map;
 }
 
 const SOURCE_BADGES = {
@@ -2521,14 +2873,20 @@ function renderTransactions(){
   txFilteredIds = rows.map(t=>t.id);
 
   // Nouvelle recherche / nouveau filtre : on repart de la première page.
-  const filterKey = [currentAccountId(), document.getElementById("filterSearch").value, document.getElementById("filterCategory").value,
-    document.getElementById("filterMonth").value, document.getElementById("sortBy").value, groupByMonth,
-    document.getElementById("onlyUncategorized").checked].join("|");
+  const filterKey = [currentAccountId(), ...["filterSearch","filterCategory","filterMonth","filterFrom","filterTo","filterChecked","sortBy"]
+    .map(id=>document.getElementById(id).value), groupByMonth, document.getElementById("onlyUncategorized").checked].join("|");
   if(filterKey !== txLastFilterKey){ txShowLimit = TX_PAGE_SIZE; txLastFilterKey = filterKey; }
 
   // On ne garde en sélection que ce qui correspond encore aux filtres.
   const visibleIds = new Set(txFilteredIds);
   selectedIds = new Set([...selectedIds].filter(id=>visibleIds.has(id)));
+
+  // Colonne « Solde » : seulement pour un compte précis (un solde tous comptes confondus
+  // ligne par ligne n'aurait pas de sens).
+  const accId = currentAccountId();
+  const balances = accId ? runningBalances(accId) : null;
+  document.getElementById("thBalance").style.display = balances ? "" : "none";
+  const colCount = balances ? 10 : 9;
 
   const monthTotals = {};
   if(groupByMonth) rows.forEach(t=>{ const mk = monthKey(t.date) || "?"; monthTotals[mk] = (monthTotals[mk]||0) + t.amount; });
@@ -2543,24 +2901,27 @@ function renderTransactions(){
       if(mk !== lastMonth){
         lastMonth = mk;
         const monthTotal = monthTotals[mk];
-        html.push(`<tr><td colspan="8" style="background:var(--surface-2); font-family:var(--font-display); font-weight:600; font-size:13px;">
+        html.push(`<tr><td colspan="${colCount}" style="background:var(--surface-2); font-family:var(--font-display); font-weight:600; font-size:13px;">
           ${escapeHtml(mk)} <span class="hint" style="margin-left:8px;">solde du mois : ${(monthTotal>=0?"+":"")+euro(monthTotal)}</span>
         </td></tr>`);
       }
     }
-    const badge = SOURCE_BADGES[t.source] || '<span class="tag none">à trier</span>';
+    const badge = t.categoryId ? (SOURCE_BADGES[t.source] || SOURCE_BADGES.manual) : '<span class="tag none">à trier</span>';
     const cat = t.categoryId ? catMap.get(t.categoryId) : null;
     const mainLabel = cat ? (cat.group || cat.name) : "";
     const subLabel = cat && cat.group ? cat.name : "";
-    html.push(`<tr>
+    const bal = balances ? balances.get(t.id) : undefined;
+    html.push(`<tr class="${t.checked ? "tx-checked" : ""}">
       <td><input type="checkbox" class="rowChk" data-id="${t.id}" style="width:auto;" ${selectedIds.has(t.id)?"checked":""}></td>
       <td>${escapeHtml(t.date||"—")}</td>
-      <td>${escapeHtml(t.label)}</td>
+      <td>${escapeHtml(t.label)}${t.note ? `<span class="tx-note">${escapeHtml(t.note)}</span>` : ""}</td>
       <td class="num amt ${t.amount>=0?'pos':'neg'}">${euro(t.amount)}</td>
+      ${balances ? `<td class="num" style="color:var(--muted);">${bal === undefined ? "—" : euro(bal)}</td>` : ""}
       <td><button type="button" class="cat-cell-btn ${mainLabel?"":"empty"}" onclick="openCategoryPicker(event,'${t.id}')">${escapeHtml(mainLabel) || "Choisir…"}</button></td>
       <td><button type="button" class="cat-cell-btn ${subLabel?"":"empty"}" onclick="openCategoryPicker(event,'${t.id}')">${escapeHtml(subLabel) || "—"}</button></td>
       <td>${badge}</td>
-      <td><button class="icon-btn" onclick="removeTx('${t.id}')" title="Supprimer">✕</button></td></tr>`);
+      <td><input type="checkbox" class="pointChk" data-id="${t.id}" style="width:auto;" ${t.checked?"checked":""} title="Pointée (vérifiée sur le relevé)"></td>
+      <td style="white-space:nowrap;"><button class="icon-btn" onclick="openTxEditor('${t.id}')" title="Modifier">✎</button><button class="icon-btn" onclick="removeTx('${t.id}')" title="Supprimer">✕</button></td></tr>`);
   });
   document.getElementById("txTable").innerHTML = html.join("");
   document.getElementById("txEmpty").style.display = rows.length ? "none" : "block";
@@ -2586,8 +2947,18 @@ function showMoreTransactions(all){
   renderTransactions();
 }
 
-// Cases à cocher des lignes : un seul écouteur pour tout le tableau.
+// Cases à cocher des lignes (sélection et pointage) : un seul écouteur pour tout le tableau.
 document.getElementById("txTable").addEventListener("change", (e)=>{
+  const point = e.target.closest(".pointChk");
+  if(point){
+    const t = state.transactions.find(x=>x.id===point.dataset.id);
+    if(!t) return;
+    t.checked = point.checked;
+    point.closest("tr").classList.toggle("tx-checked", t.checked);
+    schedulePersist();
+    renderReconcileBox();
+    return;
+  }
   const chk = e.target.closest(".rowChk");
   if(!chk) return;
   if(chk.checked) selectedIds.add(chk.dataset.id); else selectedIds.delete(chk.dataset.id);
@@ -2703,6 +3074,464 @@ function editOpeningBalance(){
       return true;
     }
   });
+}
+
+/* ---------------- Saisie / modification d'une opération ---------------- */
+function accountOptions(){ return state.accounts.map(a=>({ value:a.id, label:a.name })); }
+
+function addRuleIfNew(keyword, categoryId){
+  const kw = (keyword||"").trim();
+  if(!kw || !categoryId) return false;
+  if(state.rules.some(r=>r.keyword.toUpperCase() === kw.toUpperCase() && r.categoryId === categoryId)) return false;
+  state.rules.push({ id: uid(), keyword: kw, categoryId });
+  return true;
+}
+
+/* Sans id : nouvelle opération (espèces, chèque pas encore débité…). Avec id : modification. */
+function openTxEditor(id){
+  const t = id ? state.transactions.find(x=>x.id===id) : null;
+  if(id && !t) return;
+  const cat = t && t.categoryId ? state.categories.find(c=>c.id===t.categoryId) : null;
+  openModal({
+    title: t ? "Modifier l'opération" : "Nouvelle opération",
+    fields: [
+      { id:"date", label:"Date", type:"date", value: t ? t.date : localDateStr() },
+      { id:"label", label:"Libellé", value: t ? t.label : "", placeholder:"Ex : Boulangerie" },
+      { id:"amount", label:"Montant (€) — négatif pour une dépense", value: t ? String(t.amount).replace(".", ",") : "", placeholder:"Ex : -12,50" },
+      { id:"account", label:"Compte", type:"select", options: accountOptions(), value: t ? t.accountId : (currentAccountId() || (state.accounts[0]||{}).id) },
+      { id:"category", label:"Catégorie (optionnel)", list:"categoryDatalist", value: cat ? categoryLabel(cat) : "", placeholder:"Tapez pour rechercher…" },
+      { id:"note", label:"Note (optionnel)", value: t ? (t.note||"") : "", placeholder:"Ex : remboursé par Paul" },
+      { id:"checked", label:"Opération pointée (vérifiée sur le relevé)", type:"checkbox", value: t ? t.checked : false },
+      { id:"rule", label:"Créer une règle avec ce mot-clé (optionnel)", value:"", placeholder: t ? t.label.slice(0,30) : "Ex : BOULANGERIE" }
+    ],
+    confirmLabel: t ? "Enregistrer" : "Ajouter",
+    onConfirm: (v)=>{
+      const date = parseFlexDate(v.date);
+      if(!date){ showModalError("Date invalide."); return false; }
+      const label = (v.label||"").trim();
+      if(!label){ showModalError("Le libellé est obligatoire."); return false; }
+      const amount = parseFrenchNumber(v.amount);
+      if(isNaN(amount) || amount === 0){ showModalError("Montant invalide (ex. -12,50 pour une dépense, 1500 pour un revenu)."); return false; }
+      if(!state.accounts.some(a=>a.id===v.account)){ showModalError("Choisissez un compte."); return false; }
+      let categoryId = "";
+      if((v.category||"").trim()){
+        const c = findCategoryByLabel(v.category);
+        if(!c){ showModalError("Catégorie inconnue : « " + v.category.trim() + " »."); return false; }
+        categoryId = c.id;
+      }
+      if((v.rule||"").trim() && !categoryId){ showModalError("Choisissez une catégorie pour créer la règle."); return false; }
+      const note = (v.note||"").trim();
+      if(t){
+        if(t.categoryId !== categoryId) t.source = categoryId ? "manual" : "";
+        Object.assign(t, { date, label, amount, accountId: v.account, categoryId, checked: !!v.checked });
+        if(note) t.note = note; else delete t.note;
+      }else{
+        const tx = { id: uid(), date, label, amount, accountId: v.account, categoryId, source: categoryId ? "manual" : "", checked: !!v.checked };
+        if(note) tx.note = note;
+        state.transactions.push(tx);
+      }
+      addRuleIfNew(v.rule, categoryId);
+      matchRecurringWithTransactions();
+      schedulePersist();
+      renderAll();
+      return true;
+    }
+  });
+}
+
+function bulkSetChecked(checked){
+  state.transactions.forEach(t=>{ if(selectedIds.has(t.id)) t.checked = checked; });
+  schedulePersist();
+  renderAll();
+}
+
+/* ---------------- Rapprochement bancaire ---------------- */
+function accountBalanceAt(accId, date, onlyChecked){
+  const ob = state.openingBalances[accId] || { date:"", amount:0 };
+  let bal = ob.amount || 0;
+  state.transactions.forEach(t=>{
+    if(t.accountId !== accId || !t.date || t.date > date) return;
+    if(ob.date && t.date < ob.date) return;
+    if(onlyChecked && !t.checked) return;
+    bal += t.amount;
+  });
+  return bal;
+}
+
+function renderReconcileBox(){
+  const accId = currentAccountId();
+  document.getElementById("reconcileNeedsAccount").style.display = accId ? "none" : "block";
+  document.getElementById("reconcileForm").style.display = accId ? "block" : "none";
+  if(!accId) return;
+  const dateInput = document.getElementById("reconcileDate");
+  if(!dateInput.value) dateInput.value = localDateStr();
+  const last = state.reconciliations[accId];
+  const res = document.getElementById("reconcileResult");
+  if(res.dataset.acc !== accId){
+    res.dataset.acc = accId;
+    res.innerHTML = last
+      ? `<p class="hint">Dernier rapprochement : solde de ${euro(last.bankBalance)} au ${escapeHtml(last.date)} — ${last.diff === 0 ? "✅ concordant" : "écart de " + euro(last.diff)}.</p>`
+      : "";
+  }
+}
+
+function runReconciliation(){
+  const accId = currentAccountId();
+  if(!accId) return;
+  const date = document.getElementById("reconcileDate").value;
+  const bank = parseFrenchNumber(document.getElementById("reconcileBank").value);
+  if(!isValidIsoDate(date)){ appAlert("Indiquez la date du relevé."); return; }
+  if(isNaN(bank)){ appAlert("Indiquez le solde affiché par votre banque (ex. 1 234,56)."); return; }
+  const computed = Math.round(accountBalanceAt(accId, date, false) * 100) / 100;
+  const checkedBal = Math.round(accountBalanceAt(accId, date, true) * 100) / 100;
+  const diff = Math.round((bank - computed) * 100) / 100;
+  const ob = state.openingBalances[accId] || {};
+  const unchecked = state.transactions.filter(t=>t.accountId===accId && t.date && t.date<=date && (!ob.date || t.date>=ob.date) && !t.checked).length;
+  state.reconciliations[accId] = { date, bankBalance: bank, diff, at: new Date().toISOString() };
+  schedulePersist();
+  const res = document.getElementById("reconcileResult");
+  res.dataset.acc = accId;
+  res.innerHTML = `
+    <div class="stat-row">
+      <div><span class="hint" style="margin:0;">Solde banque</span><br><span class="v">${euro(bank)}</span></div>
+      <div><span class="hint" style="margin:0;">Solde calculé au ${escapeHtml(date)}</span><br><span class="v">${euro(computed)}</span></div>
+      <div><span class="hint" style="margin:0;">Écart</span><br><span class="v" style="color:${diff===0?'var(--green)':'var(--terracotta)'};">${diff===0 ? "0,00 € ✅" : (diff>0?"+":"") + euro(diff)}</span></div>
+      <div><span class="hint" style="margin:0;">Solde des seules opérations pointées</span><br><span class="v">${euro(checkedBal)}</span></div>
+    </div>
+    ${diff === 0
+      ? (unchecked ? `<p class="hint">Les comptes concordent. ${unchecked} opération(s) jusqu'à cette date ne sont pas encore pointées.
+          <button class="btn secondary small" onclick="checkAllUntil('${accId}','${date}')">Tout pointer jusqu'au ${escapeHtml(date)}</button></p>`
+        : `<p class="hint">Les comptes concordent et toutes les opérations sont pointées.</p>`)
+      : `<p class="hint">Écart de ${euro(diff)} : ${diff > 0 ? "une recette manque ou une dépense est en trop" : "une dépense manque ou une recette est en trop"} dans l'appli. Pistes : réimporter le relevé (les doublons sont ignorés), vérifier le solde initial (✎ en haut), filtrer « Non pointées » pour repérer l'opération.</p>`}`;
+}
+
+function checkAllUntil(accId, date){
+  const ob = state.openingBalances[accId] || {};
+  state.transactions.forEach(t=>{ if(t.accountId===accId && t.date && t.date<=date && (!ob.date || t.date>=ob.date)) t.checked = true; });
+  schedulePersist();
+  renderAll();
+  runReconciliation();
+}
+
+/* ---------------- Échéancier : opérations récurrentes et prévision ---------------- */
+const FREQ_LABELS = { weekly:"Hebdomadaire", monthly:"Mensuelle", quarterly:"Trimestrielle", annual:"Annuelle" };
+
+function daysInMonth(y, m){ return new Date(y, m+1, 0).getDate(); }
+/* Échéance suivante ; `day` = jour du mois d'origine (le 31 devient le 30 ou le 28 puis revient au 31). */
+function nextOccurrence(dateStr, frequency, day){
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if(frequency === "weekly"){
+    const dt = new Date(y, m-1, d + 7);
+    return localDateStr(dt);
+  }
+  const step = frequency === "annual" ? 12 : frequency === "quarterly" ? 3 : 1;
+  const total = (m-1) + step;
+  const ny = y + Math.floor(total/12), nm = total % 12;
+  const nd = Math.min(day || d, daysInMonth(ny, nm));
+  return `${ny}-${pad2(nm+1)}-${pad2(nd)}`;
+}
+
+function normalizeLabel(s){
+  return String(s||"").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/\d+/g," ").replace(/[^A-Z ]+/g," ").replace(/\s+/g," ").trim();
+}
+
+function recurringMatchesTx(r, t, dueDate){
+  if(t.accountId !== r.accountId || !t.date) return false;
+  if(Math.abs(t.amount - r.amount) > 0.005) return false;
+  if(daysBetween(t.date, dueDate) > 5) return false;
+  const kw = normalizeLabel(r.keyword);
+  return !kw || normalizeLabel(t.label).includes(kw);
+}
+
+/* Fait avancer les échéances déjà honorées par une opération enregistrée (même montant, à 5 jours
+   près, mot-clé dans le libellé). Renvoie true si quelque chose a changé. */
+function matchRecurringWithTransactions(){
+  let changed = false;
+  (state.recurring||[]).forEach(r=>{
+    let guard = 0;
+    while(guard++ < 120){
+      const due = r.nextDate;
+      if(!state.transactions.some(t=>recurringMatchesTx(r, t, due))) break;
+      r.nextDate = nextOccurrence(due, r.frequency, r.day);
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function addRecurring(){
+  const label = document.getElementById("recLabel").value.trim();
+  const amount = parseFrenchNumber(document.getElementById("recAmount").value);
+  const frequency = document.getElementById("recFreq").value;
+  const nextDate = document.getElementById("recNext").value;
+  const accountId = document.getElementById("recAccount").value;
+  const catVal = document.getElementById("recCategory").value.trim();
+  const keyword = document.getElementById("recKeyword").value.trim();
+  if(!label){ appAlert("Indiquez un libellé."); return; }
+  if(isNaN(amount) || amount === 0){ appAlert("Indiquez un montant (négatif pour une dépense, ex. -850)."); return; }
+  if(!isValidIsoDate(nextDate)){ appAlert("Indiquez la date de la prochaine échéance."); return; }
+  let categoryId = "";
+  if(catVal){
+    const c = findCategoryByLabel(catVal);
+    if(!c){ appAlert("Catégorie inconnue : « " + catVal + " »."); return; }
+    categoryId = c.id;
+  }
+  state.recurring.push({ id: uid(), label, amount, frequency, nextDate, day: parseInt(nextDate.slice(8,10),10), accountId, categoryId, keyword });
+  ["recLabel","recAmount","recNext","recCategory","recKeyword"].forEach(id=>{ document.getElementById(id).value = ""; });
+  matchRecurringWithTransactions();
+  schedulePersist();
+  renderRecurring();
+}
+
+function removeRecurring(id){
+  const r = state.recurring.find(x=>x.id===id);
+  if(!r) return;
+  appConfirm(`Supprimer l'opération récurrente « ${r.label} » ? Les opérations déjà enregistrées ne sont pas touchées.`, ()=>{
+    state.recurring = state.recurring.filter(x=>x.id!==id);
+    schedulePersist();
+    renderRecurring();
+  }, { title:"Supprimer une récurrence", confirmLabel:"Supprimer" });
+}
+
+/* Enregistre l'échéance comme opération (ex. prélèvement pas encore visible sur le relevé). */
+function recordRecurring(id){
+  const r = state.recurring.find(x=>x.id===id);
+  if(!r) return;
+  state.transactions.push({ id: uid(), date: r.nextDate, label: r.label, amount: r.amount, accountId: r.accountId,
+    categoryId: r.categoryId || "", source: r.categoryId ? "manual" : "", note: "Saisie depuis l'échéancier" });
+  r.nextDate = nextOccurrence(r.nextDate, r.frequency, r.day);
+  schedulePersist();
+  renderAll();
+  renderRecurring();
+}
+function skipRecurring(id){
+  const r = state.recurring.find(x=>x.id===id);
+  if(!r) return;
+  r.nextDate = nextOccurrence(r.nextDate, r.frequency, r.day);
+  schedulePersist();
+  renderRecurring();
+}
+function editRecurring(id){
+  const r = state.recurring.find(x=>x.id===id);
+  if(!r) return;
+  const cat = r.categoryId ? state.categories.find(c=>c.id===r.categoryId) : null;
+  openModal({
+    title: "Modifier l'opération récurrente",
+    fields: [
+      { id:"label", label:"Libellé", value:r.label },
+      { id:"amount", label:"Montant (€)", value:String(r.amount).replace(".", ",") },
+      { id:"frequency", label:"Fréquence", type:"select", value:r.frequency, options:Object.keys(FREQ_LABELS).map(k=>({ value:k, label:FREQ_LABELS[k] })) },
+      { id:"nextDate", label:"Prochaine échéance", type:"date", value:r.nextDate },
+      { id:"account", label:"Compte", type:"select", value:r.accountId, options: accountOptions() },
+      { id:"category", label:"Catégorie (optionnel)", list:"categoryDatalist", value: cat ? categoryLabel(cat) : "" },
+      { id:"keyword", label:"Mot-clé du libellé bancaire (optionnel)", value:r.keyword||"" }
+    ],
+    confirmLabel:"Enregistrer",
+    onConfirm:(v)=>{
+      const amount = parseFrenchNumber(v.amount);
+      if(!(v.label||"").trim()){ showModalError("Le libellé est obligatoire."); return false; }
+      if(isNaN(amount) || amount === 0){ showModalError("Montant invalide."); return false; }
+      if(!isValidIsoDate(v.nextDate)){ showModalError("Date invalide."); return false; }
+      let categoryId = "";
+      if((v.category||"").trim()){
+        const c = findCategoryByLabel(v.category);
+        if(!c){ showModalError("Catégorie inconnue."); return false; }
+        categoryId = c.id;
+      }
+      const dateChanged = v.nextDate !== r.nextDate;
+      Object.assign(r, { label:v.label.trim(), amount, frequency:v.frequency, nextDate:v.nextDate, accountId:v.account, categoryId, keyword:(v.keyword||"").trim() });
+      if(dateChanged) r.day = parseInt(v.nextDate.slice(8,10), 10);
+      matchRecurringWithTransactions();
+      schedulePersist();
+      renderRecurring();
+      return true;
+    }
+  });
+}
+
+/* Opérations présentes au moins 3 mois différents sur les 6 derniers, même libellé + montant. */
+function detectRecurringCandidates(){
+  const today = new Date();
+  const since = localDateStr(new Date(today.getFullYear(), today.getMonth()-6, 1));
+  const groups = new Map();
+  state.transactions.forEach(t=>{
+    if(!t.date || t.date < since) return;
+    const key = t.accountId + "|" + normalizeLabel(t.label) + "|" + t.amount.toFixed(2);
+    const g = groups.get(key) || { accountId:t.accountId, label:t.label, amount:t.amount, categoryId:t.categoryId, months:new Set(), last:"" };
+    g.months.add(monthKey(t.date));
+    if(t.date > g.last){ g.last = t.date; g.label = t.label; g.categoryId = t.categoryId || g.categoryId; }
+    groups.set(key, g);
+  });
+  return [...groups.values()]
+    .filter(g=> g.months.size >= 3 && normalizeLabel(g.label))
+    .filter(g=> !state.recurring.some(r=> r.accountId===g.accountId && Math.abs(r.amount-g.amount)<0.005 &&
+        (!r.keyword || normalizeLabel(g.label).includes(normalizeLabel(r.keyword)))))
+    .sort((a,b)=> a.amount - b.amount);
+}
+let recurringCandidates = [];
+function addRecurringFromCandidate(i){
+  const g = recurringCandidates[i];
+  if(!g) return;
+  const next = nextOccurrence(g.last, "monthly", parseInt(g.last.slice(8,10),10));
+  state.recurring.push({ id: uid(), label: g.label, amount: g.amount, frequency:"monthly", nextDate: next,
+    day: parseInt(g.last.slice(8,10),10), accountId: g.accountId, categoryId: g.categoryId || "", keyword: normalizeLabel(g.label) });
+  matchRecurringWithTransactions();
+  schedulePersist();
+  renderRecurring();
+}
+
+function forecastHorizonDate(){
+  const v = document.getElementById("forecastHorizon").value;
+  const now = new Date();
+  if(v === "eom") return localDateStr(new Date(now.getFullYear(), now.getMonth()+1, 0));
+  return localDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() + (parseInt(v,10)||30)));
+}
+
+function currentBalanceFor(accIds){
+  let total = 0;
+  accIds.forEach(id=>{
+    const ob = state.openingBalances[id] || { amount:0 };
+    total += (ob.amount||0) + accountRelevantTx(id).reduce((s,t)=>s+t.amount,0);
+  });
+  return total;
+}
+
+function renderRecurring(){
+  const recAcc = document.getElementById("recAccount");
+  const prevAcc = recAcc.value;
+  recAcc.innerHTML = state.accounts.map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
+  recAcc.value = state.accounts.some(a=>a.id===prevAcc) ? prevAcc : (currentAccountId() || (state.accounts[0]||{}).id || "");
+  if(!document.getElementById("recNext").value) document.getElementById("recNext").value = localDateStr();
+
+  const accNames = new Map(state.accounts.map(a=>[a.id, a.name]));
+  const catMap = categoryMap();
+  const today = localDateStr();
+
+  const sorted = [...state.recurring].sort((a,b)=> a.nextDate.localeCompare(b.nextDate));
+  document.getElementById("recurringTable").innerHTML = sorted.map(r=>{
+    const cat = r.categoryId ? catMap.get(r.categoryId) : null;
+    const late = r.nextDate < today;
+    return `<tr>
+      <td>${escapeHtml(r.label)}${r.keyword ? `<span class="tx-note">mot-clé : ${escapeHtml(r.keyword)}</span>` : ""}</td>
+      <td class="num amt ${r.amount>=0?'pos':'neg'}">${euro(r.amount)}</td>
+      <td>${FREQ_LABELS[r.frequency]}</td>
+      <td>${escapeHtml(r.nextDate)}${late ? ' <span class="badge-late" title="Aucune opération correspondante trouvée">en retard</span>' : ""}</td>
+      <td>${escapeHtml(accNames.get(r.accountId) || "—")}</td>
+      <td>${cat ? escapeHtml(categoryLabel(cat)) : "—"}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn secondary small" onclick="recordRecurring('${r.id}')" title="Crée l'opération à la date d'échéance et passe à la suivante">✓ Enregistrer</button>
+        <button class="btn secondary small" onclick="skipRecurring('${r.id}')" title="Passer cette échéance sans rien enregistrer">⏭ Passer</button>
+        <button class="icon-btn" onclick="editRecurring('${r.id}')" title="Modifier">✎</button>
+        <button class="icon-btn" onclick="removeRecurring('${r.id}')" title="Supprimer">✕</button>
+      </td></tr>`;
+  }).join("");
+  document.getElementById("recurringEmpty").style.display = sorted.length ? "none" : "block";
+
+  // Prévision : occurrences jusqu'à l'horizon (les échéances en retard sont comptées aujourd'hui).
+  const accId = currentAccountId();
+  const accIds = accId ? [accId] : state.accounts.map(a=>a.id);
+  const horizon = forecastHorizonDate();
+  const events = [];
+  state.recurring.filter(r=>accIds.includes(r.accountId)).forEach(r=>{
+    let d = r.nextDate, guard = 0;
+    while(d <= horizon && guard++ < 400){
+      events.push({ date: d < today ? today : d, late: d < today, label: r.label, accountId: r.accountId, amount: r.amount });
+      d = nextOccurrence(d, r.frequency, r.day);
+    }
+  });
+  events.sort((a,b)=> a.date.localeCompare(b.date));
+  const start = currentBalanceFor(accIds);
+  let bal = start, minBal = start, minDate = today;
+  const rowsHtml = events.map(e=>{
+    bal += e.amount;
+    if(bal < minBal){ minBal = bal; minDate = e.date; }
+    return `<tr><td>${escapeHtml(e.date)}${e.late ? ' <span class="badge-late">en retard</span>' : ""}</td><td>${escapeHtml(e.label)}</td>
+      <td>${escapeHtml(accNames.get(e.accountId)||"")}</td><td class="num amt ${e.amount>=0?'pos':'neg'}">${euro(e.amount)}</td>
+      <td class="num" style="color:${bal<0?'var(--terracotta)':'inherit'};">${euro(bal)}</td></tr>`;
+  });
+  document.getElementById("forecastTable").innerHTML = rowsHtml.join("");
+  document.getElementById("forecastEmpty").style.display = events.length ? "none" : "block";
+  document.getElementById("forecastBox").innerHTML = `<div class="stat-row">
+      <div><span class="hint" style="margin:0;">Solde actuel</span><br><span class="v">${euro(start)}</span></div>
+      <div><span class="hint" style="margin:0;">À venir d'ici le ${escapeHtml(horizon)}</span><br><span class="v">${(bal-start>=0?"+":"")+euro(bal-start)}</span></div>
+      <div><span class="hint" style="margin:0;">Solde prévu au ${escapeHtml(horizon)}</span><br><span class="v" style="color:${bal<0?'var(--terracotta)':'var(--green)'};">${euro(bal)}</span></div>
+      ${minBal < 0 && minBal < start ? `<div><span class="hint" style="margin:0;">⚠️ Point bas</span><br><span class="v" style="color:var(--terracotta);">${euro(minBal)} le ${escapeHtml(minDate)}</span></div>` : ""}
+    </div>`;
+
+  recurringCandidates = detectRecurringCandidates();
+  document.getElementById("recurringSuggestBox").style.display = recurringCandidates.length ? "block" : "none";
+  document.getElementById("recurringSuggestTable").innerHTML = recurringCandidates.map((g,i)=>`<tr>
+      <td>${escapeHtml(g.label)}</td><td class="num amt ${g.amount>=0?'pos':'neg'}">${euro(g.amount)}</td>
+      <td>${escapeHtml(accNames.get(g.accountId)||"")}</td><td>${[...g.months].sort().map(escapeHtml).join(", ")}</td>
+      <td><button class="btn secondary small" onclick="addRecurringFromCandidate(${i})">＋ Ajouter (mensuelle)</button></td></tr>`).join("");
+}
+
+/* ---------------- Comparaison annuelle ---------------- */
+function renderYearCompare(){
+  const scoped = getScopedTransactions();
+  const sel = document.getElementById("yearCompareYear");
+  const years = Array.from(new Set(scoped.map(t=>(t.date||"").slice(0,4)).filter(Boolean))).sort().reverse();
+  const prevSel = sel.value;
+  sel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join("");
+  sel.value = years.includes(prevSel) ? prevSel : (years[0] || "");
+  const year = sel.value;
+  document.getElementById("yearCompareEmpty").style.display = year ? "none" : "block";
+  if(!year){ document.getElementById("yearCompareTable").innerHTML = ""; return; }
+  const prev = String(parseInt(year,10) - 1);
+  // Même période de l'année précédente si l'année choisie est en cours (comparaison équitable).
+  const isCurrent = year === String(new Date().getFullYear());
+  const cutoff = isCurrent ? localDateStr().slice(5) : "12-31";
+  document.getElementById("ycPrevHead").textContent = prev;
+  document.getElementById("ycCurHead").textContent = year;
+  document.getElementById("yearCompareSub").textContent = "Dépenses et revenus nets par catégorie principale" +
+    (isCurrent ? `, du 1er janvier au ${cutoff.split("-").reverse().join("/")} des deux années` : "") + " (hors virements internes).";
+  const catMap = categoryMap();
+  const sums = {};
+  scoped.forEach(t=>{
+    const y = (t.date||"").slice(0,4);
+    if((y !== year && y !== prev) || t.date.slice(5) > cutoff) return;
+    const cat = t.categoryId ? catMap.get(t.categoryId) : null;
+    if(cat && cat.transfer) return;
+    const label = categoryBucketLabel(cat);
+    const o = sums[label] = sums[label] || { cur:0, prev:0 };
+    if(y === year) o.cur += t.amount; else o.prev += t.amount;
+  });
+  const rows = Object.keys(sums).map(label=>({ label, ...sums[label] }))
+    .filter(r=> Math.abs(r.cur) > 0.005 || Math.abs(r.prev) > 0.005)
+    .sort((a,b)=> a.cur - b.cur);
+  const tot = rows.reduce((o,r)=>({ cur:o.cur+r.cur, prev:o.prev+r.prev }), { cur:0, prev:0 });
+  const line = (label, r, bold)=>{
+    const diff = r.cur - r.prev;
+    const pct = Math.abs(r.prev) > 0.005 ? Math.round((diff/Math.abs(r.prev))*100) : null;
+    // Pour une catégorie de dépenses (montants négatifs), une baisse du montant est une bonne nouvelle.
+    const good = diff >= 0;
+    return `<tr${bold?' style="font-weight:600;"':''}><td>${escapeHtml(label)}</td>
+      <td class="num">${euro(r.prev)}</td><td class="num">${euro(r.cur)}</td>
+      <td class="num" style="color:${Math.abs(diff)<0.005?'inherit':good?'var(--green)':'var(--terracotta)'};">${(diff>=0?"+":"")+euro(diff)}</td>
+      <td class="num">${pct===null ? "—" : (pct>=0?"+":"")+pct+" %"}</td></tr>`;
+  };
+  document.getElementById("yearCompareTable").innerHTML = rows.map(r=>line(r.label, r)).join("") + (rows.length ? line("Solde (revenus − dépenses)", tot, true) : "");
+}
+
+/* ---------------- Rappel de sauvegarde ---------------- */
+const LAST_BACKUP_KEY = "familyBudget_lastBackupAt";
+function renderBackupHint(){
+  const el = document.getElementById("backupHint");
+  if(!el) return;
+  const last = parseInt(lsGet(LAST_BACKUP_KEY) || "0", 10);
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  el.classList.remove("backup-warn");
+  if(!state.transactions.length){ el.textContent = "Une sauvegarde manuelle reste possible en complément."; return; }
+  if(days === null){
+    el.textContent = "⚠️ Aucune sauvegarde manuelle exportée depuis cet appareil.";
+    el.classList.add("backup-warn");
+  }else if(days >= 30){
+    el.textContent = `⚠️ Dernière sauvegarde manuelle il y a ${days} jours.`;
+    el.classList.add("backup-warn");
+  }else{
+    el.textContent = days === 0 ? "Sauvegarde manuelle exportée aujourd'hui." : `Dernière sauvegarde manuelle il y a ${days} jour(s).`;
+  }
 }
 
 /* ---------------- Dashboard ---------------- */
@@ -2887,6 +3716,7 @@ function renderDashboard(){
   document.getElementById("dashBudgetAnnual").innerHTML = annualHTML;
   document.getElementById("dashBudgetEmpty").style.display = (monthlyHTML || annualHTML) ? "none" : "block";
 
+  renderYearCompare();
   applyDashboardConfig();
 }
 
@@ -2978,6 +3808,8 @@ function resetCategoriesData(){
       state.categories = defaultCategories();
       state.rules = [];
       state.transactions.forEach(t=>{ t.categoryId = ""; t.source = ""; });
+      state.recurring.forEach(r=>{ r.categoryId = ""; });
+      state.budgets = state.budgets.filter(b=>b.scope.type !== "category");
       schedulePersist();
       renderAll();
       appAlert("Les catégories et règles ont été réinitialisées.");
@@ -2988,7 +3820,9 @@ function resetCategoriesData(){
 
 function exportBackup(){
   const safe = (state.famTitle||"comptes").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
-  saveFile((safe||"comptes")+"-sauvegarde.json", JSON.stringify(serializeState(), null, 2), "application/json");
+  saveFile((safe||"comptes")+"-sauvegarde-"+localDateStr()+".json", JSON.stringify(serializeState(), null, 2), "application/json");
+  lsSet(LAST_BACKUP_KEY, String(Date.now()));
+  renderBackupHint();
 }
 
 function importBackup(file){
@@ -3008,6 +3842,8 @@ function importBackup(file){
       if(parsed.openingBalance) state.openingBalance = parsed.openingBalance;
       state.budgets = arr(parsed.budgets, state.budgets);
       if(parsed.dashboardConfig && typeof parsed.dashboardConfig === "object") state.dashboardConfig = parsed.dashboardConfig;
+      state.recurring = arr(parsed.recurring, state.recurring);
+      if(parsed.reconciliations && typeof parsed.reconciliations === "object") state.reconciliations = parsed.reconciliations;
       const importedTxs = arr(parsed.transactions, []).filter(t=>t && typeof t === "object");
       importedTxs.forEach(t=>{
         const idx = state.transactions.findIndex(x=>x.id===t.id);
@@ -3102,6 +3938,9 @@ function renderAll(){
   if(isViewActive("dashboard")) renderDashboard();
   renderImportBatches();
   if(isViewActive("budget")) renderBudgets();
+  if(isViewActive("echeancier")) renderRecurring();
+  renderReconcileBox();
+  renderBackupHint();
 }
 initStorage();
 
