@@ -2,6 +2,23 @@
 
 Application de suivi de budget qui tient dans un seul fichier, `index.html` : import de relevés bancaires CSV, tri automatique par règles, plusieurs comptes, budgets mensuels et annuels, tableau de bord.
 
+## Fonctionnalités
+
+- **Import** de relevés CSV, OFX (« format Money ») et QIF, avec détection des doublons et des opérations absentes du relevé.
+- **Saisie et modification manuelles** d'une opération (espèces, chèque…) : date, libellé, montant, compte, catégorie et note.
+- **Plusieurs comptes**, solde initial par compte, et **solde après chaque opération** quand un compte est sélectionné.
+- **Pointage et rapprochement bancaire** : cochez les opérations vérifiées, puis comparez le solde de l'appli avec celui de la banque à une date donnée.
+- **Catégories et règles de tri automatique** (modifiables et ordonnables). On peut aussi créer une règle directement depuis une opération.
+- **Budgets** mensuels et annuels, et provisions.
+- **Échéancier** :
+  - opérations récurrentes (loyer, salaire, abonnements…), qui avancent automatiquement quand l'opération correspondante est importée ;
+  - suggestions tirées de l'historique ;
+  - **prévision de solde** avec alerte en cas de passage dans le rouge.
+- **Tableau de bord** : évolution, habitudes par catégorie, état des budgets, détail mensuel et **comparaison annuelle** (N / N-1).
+- **Recherche** par libellé, note ou montant, et filtres par période, catégorie et pointage.
+- **Annuler** (Ctrl+Z) les 15 dernières modifications.
+- Export CSV et PDF, sauvegarde JSON (avec un rappel si aucune n'a été faite depuis 30 jours), synchronisation Google Drive.
+
 ## Utilisation
 
 Ouvrez `index.html` dans un navigateur, ou publiez-le (GitHub Pages par exemple). Les données restent dans le navigateur (`localStorage`). Il est prudent d'exporter régulièrement une sauvegarde JSON (bouton « Exporter la sauvegarde »).

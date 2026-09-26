@@ -88,5 +88,60 @@ test("csvCell", ()=>{
   assert.strictEqual(ctx.csvCell('a;b "c"'), '"a;b ""c"""');
 });
 
+console.log("import OFX / QIF");
+test("OFX v1 (SGML sans balises fermantes)", ()=>{
+  const ofx = `OFXHEADER:100
+DATA:OFXSGML
+<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>
+<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>20260921
+<TRNAMT>-42,90
+<FITID>123
+<NAME>CB CARREFOUR
+<MEMO>PARIS 15
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>CREDIT
+<DTPOSTED>20260925120000[+2:CEST]
+<TRNAMT>2500.00
+<NAME>VIR SALAIRE &amp; PRIME
+</STMTTRN>
+</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
+  assert.ok(ctx.looksLikeOfx(ofx));
+  const rows = ctx.parseOfx(ofx);
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rows[0])), { date:"2026-09-21", label:"CB CARREFOUR PARIS 15", amount:"-42,90" });
+  assert.strictEqual(rows[1].date, "2026-09-25");
+  assert.strictEqual(rows[1].label, "VIR SALAIRE & PRIME");
+  assert.strictEqual(ctx.parseFrenchNumber(rows[1].amount), 2500);
+});
+test("OFX v2 (XML)", ()=>{
+  const ofx = `<?xml version="1.0"?><OFX><STMTTRN><TRNTYPE>DEBIT</TRNTYPE><DTPOSTED>20260102</DTPOSTED><TRNAMT>-5.5</TRNAMT><NAME>BOULANGERIE</NAME><MEMO>BOULANGERIE</MEMO></STMTTRN></OFX>`;
+  const rows = ctx.parseOfx(ofx);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].label, "BOULANGERIE");
+  assert.strictEqual(rows[0].date, "2026-01-02");
+});
+test("QIF jour/mois (français)", ()=>{
+  const qif = "!Type:Bank\nD24/09/2026\nT-1 234,56\nPLOYER\nMseptembre\n^\nD01/10/26\nT15.00\nPREMBOURSEMENT\n^\n";
+  assert.ok(ctx.looksLikeQif(qif));
+  const rows = ctx.parseQif(qif);
+  assert.strictEqual(rows.length, 2);
+  assert.strictEqual(rows[0].date, "2026-09-24");
+  assert.strictEqual(rows[0].label, "LOYER septembre");
+  assert.strictEqual(ctx.parseFrenchNumber(rows[0].amount), -1234.56);
+  assert.strictEqual(rows[1].date, "2026-10-01");
+});
+test("QIF mois/jour (américain) détecté", ()=>{
+  const rows = ctx.parseQif("!Type:Bank\nD09/24'2026\nT-10\nPA\n^\nD10/01/2026\nT-3\nPB\n^");
+  assert.strictEqual(rows[0].date, "2026-09-24");
+  assert.strictEqual(rows[1].date, "2026-10-01");
+});
+test("un CSV n'est ni OFX ni QIF", ()=>{
+  const csv = "Date;Libellé;Montant\n24/09/2026;CAFE;-2";
+  assert.ok(!ctx.looksLikeOfx(csv) && !ctx.looksLikeQif(csv));
+});
+
 console.log(`\n${passed} réussi(s), ${failed} échoué(s)`);
 process.exit(failed ? 1 : 0);
