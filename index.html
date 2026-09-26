@@ -860,8 +860,13 @@ function migrateState(s){
     s[k] = Array.isArray(s[k]) ? s[k].filter(x=>x && typeof x === "object") : [];
   });
   if(!s.openingBalances || typeof s.openingBalances !== "object") s.openingBalances = {};
-  s.transactions = s.transactions.filter(t=> typeof t.amount === "number" && isFinite(t.amount));
+  // Ne JAMAIS écarter une opération : un montant stocké en texte (ex. par un script Google qui
+  // passe par une feuille de calcul) est converti ; un montant illisible devient 0.
   s.transactions.forEach(t=>{
+    if(typeof t.amount !== "number" || !isFinite(t.amount)){
+      const v = parseFrenchNumber(t.amount);
+      t.amount = isFinite(v) ? v : 0;
+    }
     t.label = String(t.label == null ? "" : t.label);
     t.date = isValidIsoDate(t.date) ? t.date : (parseFlexDate(t.date) || "");
     if(t.source === "ai") t.source = "manual"; // ancienne origine « IA », jamais réellement utilisée
@@ -870,7 +875,7 @@ function migrateState(s){
   s.categories.forEach(c=>{ c.name = String(c.name == null ? "" : c.name); if(c.group != null) c.group = String(c.group); });
   s.accounts.forEach(a=>{ a.name = String(a.name == null ? "" : a.name); });
   s.rules.forEach(r=>{ r.keyword = String(r.keyword == null ? "" : r.keyword); });
-  s.budgets = s.budgets.filter(b=> b.scope && typeof b.scope === "object");
+  s.budgets.forEach(b=>{ if(!b.scope || typeof b.scope !== "object") b.scope = { type:"group", value:"" }; });
   s.budgets.forEach(b=>{ b.amount = Number(b.amount) || 0; b.scope.value = String(b.scope.value == null ? "" : b.scope.value); });
   sanitizeIds(s);
   if(s.accounts.length === 0){
